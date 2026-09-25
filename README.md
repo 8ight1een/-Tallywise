@@ -1,11 +1,12 @@
 #  Tallywise
 
-个人记账学习项目，目前使用MySQL。
+个人记账学习项目，目前使用FastAPI，SQLALchemy,MySQL。
 该项目因家人需求而创造，并会根据用户使用反馈进行迭代，也会根据本人技术栈的更新来迭代。
 
 
 ## 目录
 - `database/schema.sql`:MySQL建表脚本
+- `backend/`：后端源码、依赖清单
 
 
 
@@ -15,5 +16,37 @@
 在 MySQL 中自行创建一个空数据库（例如 tallywise，使用 utf8mb4 字符集），选择该数据库后执行 `database/schema.sql`。
 脚本只建表，不创建数据库或 MySQL 用户。请勿在已有数据的库中重复执行。
 脚本不包含演示数据，可自行添加。
+
+### 2.后端连接数据库
+在 `backend/database.py` 中配置数据库访问，使用 SQLAlchemy 和 `aiomysql` 驱动进行异步数据库操作。
+
+连接信息通过以下环境变量提供：
+
+|环境变量|含义|
+|---|---|
+|`DATABASE_USERNAME`|MySQL 用户名|
+|`DATABASE_PASSWORD`|MySQL 密码|
+|`DATABASE_HOST`|MySQL 服务器地址，本机通常为 `localhost`|
+|`DATABASE_NAME`|第一步创建的数据库名称|
+
+当前代码使用端口 `3306`，如果本机 MySQL 使用其他端口，需要同步修改。
+
+数据库访问代码分为四部分：
+
+1. 使用 `URL.create()` 组织数据库连接信息。
+    
+2. 使用 `create_async_engine()` 创建异步引擎，管理数据库连接池。
+    
+3. 使用 `async_sessionmaker()` 创建会话工厂，为后续数据库操作提供 `AsyncSession`。
+    
+4. 封装 `commit_session()`，统一处理事务提交和数据完整性异常：
+    
+    - 调用 `session.commit()` 提交事务。
+        
+    - 如果发生 `IntegrityError`（例如违反唯一约束或外键约束），调用 `session.rollback()` 回滚事务。
+        
+    - 返回 HTTP `409 Conflict`，由调用方通过 `detail` 提供具体的错误提示。
+
+创建引擎并不代表已经连接成功，需要实际执行数据库查询，才能验证连接配置是否可用。
    
   
