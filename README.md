@@ -88,4 +88,17 @@ ORM 模型负责描述数据库表的映射，Pydantic 模型负责接口数据�
     
 4. 对过期、被篡改或缺少必要字段的令牌，统一按身份验证失败处理。
    
-  
+
+### 6. 创建应用入口和健康检查接口
+
+在 `backend/main.py` 中创建 FastAPI 应用，并添加 `/health` 接口，用于检查后端服务是否能够正常响应。
+在 `backend` 目录下，使用已安装项目依赖的 Python 环境启动服务：
+
+```powershell
+python -m uvicorn main:app --reload
+```
+访问 `http://127.0.0.1:8000/health`，正常情况下返回 HTTP 200 和以下内容：
+```json
+{"status": "ok"}
+```
+该接口只检查应用是否能响应请求，不检查数据库连接或 JWT 功能。`--reload` 用于本地开发。
