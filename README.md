@@ -121,3 +121,21 @@ python -m uvicorn main:app --reload
     
 
 本步骤只负责创建账号。注册成功后，由用户通过后续登录接口建立登录状态。可以通过docs来测试注册接口。
+
+### 8. 编写用户登录和退出接口
+
+在 `backend/routers/users.py` 中添加登录和退出接口，使用 JWT 与 Cookie 管理登录凭证。
+
+1. 在 `backend/schemas.py` 中新增 `UserLogin` 请求模型，接收邮箱和密码。
+
+2. 登录时根据邮箱查询用户，使用 `verify_password()` 比较输入的密码与数据库中的密码哈希；用户不存在或密码错误时，返回 HTTP 401。
+
+3. 通过 `response: Response` 获取响应对象，将生成的 JWT 写入名为 `access_token` 的 Cookie。
+
+4. 设置 `HttpOnly`、`SameSite`、`Secure` 和有效期，控制 Cookie 的读取权限、发送条件和保存时间。
+
+5. 添加退出接口，通过 `delete_cookie("access_token")` 通知浏览器删除登录 Cookie。
+
+当前接口代码仍需修正和验证：密码哈希字段应使用 `user.password_hash`，生成 JWT 时应将用户 ID 转为字符串，`jwt.encode()` 的 `algorithm` 参数应使用 `"HS256"`。
+
+修正后，通过 `/docs` 检查正确密码登录、错误密码拒绝、不存在的邮箱拒绝，以及退出响应是否设置删除 Cookie 的指令。删除 Cookie 不会立即使已经签发的 JWT 失效（JWT弊端）。
