@@ -139,3 +139,59 @@ python -m uvicorn main:app --reload
 当前接口代码仍需修正和验证：密码哈希字段应使用 `user.password_hash`，生成 JWT 时应将用户 ID 转为字符串，`jwt.encode()` 的 `algorithm` 参数应使用 `"HS256"`。
 
 修正后，通过 `/docs` 检查正确密码登录、错误密码拒绝、不存在的邮箱拒绝，以及退出响应是否设置删除 Cookie 的指令。删除 Cookie 不会立即使已经签发的 JWT 失效（JWT弊端）。
+
+### 9. 初始化前端开发环境
+
+在 `frontend` 目录中使用 create-vue 初始化 Vue 项目，通过 Vite 启动本地开发服务器。
+
+1. 检查 Node.js 和 npm 是否安装：
+
+   ```powershell
+   node --version
+   npm.cmd --version
+   ```
+
+   Node.js 版本需要满足 `frontend/package.json` 中的 `engines.node` 要求。当前要求为 `^22.18.0 || >=24.12.0`。
+
+2. 首次初始化时，创建并进入前端目录：
+
+   ```powershell
+   New-Item -ItemType Directory -Force -Path "D:\tallywisee\frontend"
+   Set-Location "D:\tallywisee\frontend"
+   ```
+
+3. 使用 Vue 官方脚手架在当前目录创建项目：
+
+   ```powershell
+   npm.cmd create vue@latest .
+   ```
+
+   命令末尾的 `.` 表示在当前目录生成项目，不再创建一层子目录。按照交互提示选择功能，当前项目包含 TypeScript、Vue Router、ESLint、Oxlint 和 Prettier。
+
+   此命令只在首次创建项目时执行。如果目录中已有 `package.json` 和源码，跳过此步，避免覆盖现有文件。
+
+4. 安装项目依赖：
+
+   ```powershell
+   npm.cmd install
+   ```
+
+   安装后生成 `node_modules` 和 `package-lock.json`。提交源码时保留锁文件，`node_modules` 由 `.gitignore` 排除。
+
+5. 启动本地开发服务器：
+
+   ```powershell
+   npm.cmd run dev
+   ```
+
+   在浏览器中打开终端显示的 Local 地址。开发服务器会持续占用当前终端，按 `Ctrl+C` 停止。
+
+6. 停止开发服务器后，检查项目能否构建：
+
+   ```powershell
+   npm.cmd run build
+   ```
+
+   当前构建命令包含 TypeScript 类型检查和生产构建，生成的 `dist` 目录由 `.gitignore` 排除。
+
+本步骤用于建立前端工程和开发环境。页面能够打开、项目能够构建，不代表已经完成与 FastAPI 后端的接口联调。
