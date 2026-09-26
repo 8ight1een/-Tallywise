@@ -30,3 +30,6 @@ class UserCreate(BaseModel):
     password: str=Field(min_length=8, max_length=32)
     nickname: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
 
+class UserLogin(BaseModel):
+    email: str
+    password: str = Field(min_length=1, max_length=32)
