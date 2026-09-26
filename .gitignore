@@ -1,26 +1,60 @@
-# Obsidian笔记目录
+# Obsidian 笔记配置
 .obsidian/
 
-# Python 虚拟环境
-backend/.venv/
-
-# Python缓存文件
+# Python 虚拟环境和缓存
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
-# 环境变量
-backend/.env
+# 前端依赖、构建产物和工具缓存
+node_modules/
+/frontend/dist/
+/frontend/dist-ssr/
+/frontend/coverage/
+*.tsbuildinfo
+.eslintcache
 
-# SQLite数据库二进制文件（只保留sql脚本）
+# 本地环境变量（保留配置示例）
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# SQLite 数据库（保留 SQL 建表脚本）
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 
-# IDE配置文件
+# 编辑器和系统文件
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
 
-# 日志文件
+# 日志
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
