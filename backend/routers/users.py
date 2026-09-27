@@ -47,7 +47,7 @@ async def login(
     email = data.email.strip().lower()
     result=await db.execute(select(User).where(User.email==email))
     user = result.scalar_one_or_none()
-    if user is None or not await run_in_threadpool(verify_password,data.password,user.pass_hash):
+    if user is None or not await run_in_threadpool(verify_password,data.password,user.password_hash):
         raise HTTPException(status_code=401,detail="邮箱或密码错误")
 
     response.set_cookie(

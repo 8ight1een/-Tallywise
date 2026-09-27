@@ -28,7 +28,7 @@ def verify_password(plain_password:str, hashed_password:str) -> bool:
     except UnknownHashError:
         return False
 
-def create_access_token(user_id:str) -> str:
+def create_access_token(user_id:int) -> str:
     payload = {
         'sub': user_id,
         'exp': datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
