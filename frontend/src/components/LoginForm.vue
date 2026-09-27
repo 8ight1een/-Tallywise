@@ -17,6 +17,7 @@
           <label>
             邮箱
             <input
+              :disabled="isLoading"
               v-model.trim="email"
               type="email"
               autocomplete="email"
@@ -28,6 +29,7 @@
           <label>
             密码
             <input
+              :disabled="isLoading"
               v-model="password"
               type="password"
               autocomplete="current-password"
@@ -44,6 +46,11 @@
           </button>
         </form>
 
+        <p class="auth-switch">
+          还没有账号？
+
+          <button type="button" :disabled="isLoading" @click="emit('showRegister')">立即注册</button>
+        </p>
       </div>
     </div>
   </div>
@@ -51,8 +58,8 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { request, errorMessage as getErrorMessage,resetApiSession } from '../api/client'
-import type { User, LoginResponse } from '../types/index'
+import { request, errorMessage as getErrorMessage } from '../api/client'
+import type { User, LoginResponse } from '../types'
 
 const props = defineProps<{
   initialEmail?: string
@@ -61,6 +68,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   loginSuccess: [user: User]
+  showRegister: []
 }>()
 
 const email = ref(props.initialEmail ?? '')
@@ -69,13 +77,15 @@ const isLoading = ref(false)
 const errorMessage = ref('')
 
 async function handleLogin() {
+  if (isLoading.value) return
+
   errorMessage.value = ''
   isLoading.value = true
 
   try {
     const loginData = await request<LoginResponse>('/api/auth/login', {
       method: 'POST',
-      requireAuth: false,
+      requiresAuth: false,
       fallbackMessage: '登录失败，请检查邮箱和密码。',
       json: { email: email.value, password: password.value },
     })
@@ -91,4 +101,3 @@ async function handleLogin() {
   }
 }
 </script>
-
