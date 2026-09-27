@@ -59,6 +59,15 @@ async def login(
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES*60,
     )
 
+    return {
+        "message": "登录成功",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "nickname": user.nickname
+        }
+    }
+
 @router.post("/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token")
