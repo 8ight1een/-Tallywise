@@ -266,7 +266,7 @@ python -m uvicorn main:app --reload
 
 5. 使用 `request<LoginResponse>()` 调用登录接口，传入 `method: 'POST'`、`json` 请求体和 `fallbackMessage` 默认提示，并用泛型声明返回类型，避免把响应当成 `any` 使用。
 
-6. 登录接口是公开接口，调用时显式传入 `requireAuth: false`。否则密码错误返回的 401 会被当成"登录状态已失效"，触发未登录回调。
+6. 登录接口是公开接口，调用时显式传入 `requiresAuth: false`。否则密码错误返回的 401 会被当成"登录状态已失效"，触发未登录回调。
 
 7. 登录成功后清空密码框，调用 `resetApiSession()` 恢复会话状态，再通过 `emit('loginSuccess', user)` 把用户信息交给父组件。
 
@@ -277,3 +277,31 @@ python -m uvicorn main:app --reload
 10. 样式统一定义在 `frontend/src/assets/main.css`：登录页使用 `auth-screen`、`auth-card`、`auth-brand`、`brand-mark`、`auth-subtitle`、`auth-form`、`auth-submit`、`auth-error` 等类名，主界面使用 `app`、`header`、`user-info`、`greeting` 等类名，组件内不再重复写样式。`frontend/src/main.ts` 引入该样式文件，`frontend/index.html` 设置页面标题。
 
 本步骤只实现登录。注册、退出登录和主界面内容留到下一步。
+
+### 12. 实现注册、登录态恢复与退出登录
+
+在 `frontend/src/components/RegisterForm.vue` 中实现注册页，在 `frontend/src/components/DashboardView.vue` 中搭出主界面，并在 `frontend/src/App.vue` 中集中管理登录状态：注册成功后回到登录页、刷新页面时用 `/api/auth/me` 恢复登录态、退出登录时清除状态。后端在 `backend/routers/users.py` 中新增 `/api/auth/me` 接口。
+
+1. 后端新增 `GET /api/auth/me`，通过 `Depends(get_current_user)` 读取 Cookie 中的 JWT 并返回当前用户的编号、邮箱和昵称，未登录或令牌失效时统一返回 401。这是 `get_current_user` 第一次被真正调用，登录 Cookie 的有效性也第一次得到验证。
+
+2. 在 `App.vue` 中集中管理状态：`currentUser`（当前用户）、`authMode`（`login` / `register`）、`loginEmail`（注册成功后预填的邮箱）、`authNotice`（提示信息）、`isCheckingAuth`（是否正在检查登录状态）、`isLoggingOut`（是否正在退出）。
+
+3. 首次加载时调用 `GET /api/auth/me` 恢复登录态。因为"没有登录"是正常情况而不是错误，所以传入 `requiresAuth: false`，并且只有非 401 的错误才写入 `authNotice`，401 直接当作未登录处理。
+
+4. 用 `onUnauthorized()` 注册全局的登录过期回调：清空 `currentUser`、切回登录页、保留邮箱并显示"登录已过期，请重新登录。"；组件卸载时通过 `onUnmounted` 注销回调，避免回调重复注册。
+
+5. 登录成功后调用 `resetApiSession()` 并清空提示，恢复会话状态；退出登录调用 `POST /api/auth/logout`，成功后同样调用 `resetApiSession()` 并清空 `currentUser`，重新回到登录页。
+
+6. 注册页包含昵称、邮箱、密码和确认密码四个输入框，提交前先在前端比对两次密码是否一致，避免多打一次接口；请求成功后清空密码框，通过 `emit('registerSuccess', email)` 把邮箱交回父组件。
+
+7. 父组件收到注册成功事件后切回登录页并预填邮箱，用户只需再输入密码即可登录。
+
+8. 主界面通过 props 接收 `user` 和 `isLoggingOut`，顶部显示昵称、邮箱和退出按钮，`isLoggingOut` 为真时禁用按钮并显示"退出中…"，避免重复点击。
+
+9. `LoginForm.vue` 同步调整：请求期间禁用输入框，`handleLogin` 开头判断 `isLoading` 防止重复提交。
+
+10. 页面按状态依次渲染四种视图：正在检查登录状态 → 登录页 → 注册页 → 主界面。
+
+本步骤完成后，前端已经能和后端跑通"注册 → 登录 → 主界面 → 退出"的完整闭环，刷新页面也能恢复登录态。
+
+
