@@ -195,3 +195,39 @@ python -m uvicorn main:app --reload
    当前构建命令包含 TypeScript 类型检查和生产构建，生成的 `dist` 目录由 `.gitignore` 排除。
 
 本步骤用于建立前端工程和开发环境。页面能够打开、项目能够构建，不代表已经完成与 FastAPI 后端的接口联调。
+
+### 10. 配置开发代理并封装 API 请求工具
+
+前端由 Vite 开发服务器提供（默认 `http://localhost:5173`），后端由 uvicorn 提供（默认 `http://127.0.0.1:8000`），端口不同即属于跨源。先在 `frontend/vite.config.ts` 中配置开发代理，再在 `frontend/src/api/client.ts` 中封装基于 `fetch()` 的请求工具，为后续页面调用后端接口提供统一入口。
+
+1. 在 `frontend/vite.config.ts` 中配置 `server.proxy`，把 `/api` 开头的请求转发给后端：
+
+   ```ts
+   server: {
+     proxy: {
+       '/api': {
+         target: 'http://127.0.0.1:8000',
+         changeOrigin: true,
+       },
+     },
+   },
+   ```
+
+
+2. 前端统一使用相对路径 `/api/...` 请求接口。写成后端的完整地址会重新变成跨源请求，`credentials: 'same-origin'` 在跨源时不会携带 Cookie，登录状态无法建立；经过代理后浏览器只看到开发服务器这一个源，后端也不需要配置 CORS。
+
+3. 定义 `request<T>()`，统一处理请求选项、JSON 请求体和响应解析，通过泛型声明预期的返回数据类型。
+
+4. 使用 `credentials: 'same-origin'`，在同源请求中携带登录 Cookie。
+
+5. 定义 `ApiRequestError`，保存错误信息和 HTTP 状态码，统一处理网络错误、接口失败和响应格式错误。
+
+6. 优先读取后端返回的字符串 `detail` 作为错误提示，没有可用信息时使用默认提示。
+
+7. 提供未登录回调、会话重置和错误判断工具，通过会话版本区分请求所属的登录状态，避免旧请求的 401 干扰新会话。登录成功后需要调用 `resetApiSession()` 恢复会话状态。
+
+8. 对 HTTP 204 响应直接返回，不尝试解析 JSON。
+
+9. 修改代理配置后需要重启开发服务器才会生效。可以在浏览器控制台用 `fetch('/api/...')` 验证请求能否到达后端，以及响应头中的 `Set-Cookie` 是否被浏览器保存。
+
+本步骤只配置开发代理并封装请求工具，页面调用留到下一步。
