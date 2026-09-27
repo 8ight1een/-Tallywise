@@ -2,7 +2,7 @@ import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from model import User
-from auth import hash_password,verify_password,ACCESS_TOKEN_EXPIRE_MINUTES,create_access_token
+from auth import hash_password,verify_password,ACCESS_TOKEN_EXPIRE_MINUTES,create_access_token,get_current_user
 from schemas import  UserCreate,UserLogin
 from sqlalchemy import   select
 from fastapi import Depends, HTTPException, APIRouter,Response
@@ -74,4 +74,14 @@ async def logout(response: Response):
 
     return {
         "message": "已退出登录"
+    }
+
+@router.get("/auth/me")
+async def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "nickname": current_user.nickname,
     }
