@@ -304,4 +304,53 @@ python -m uvicorn main:app --reload
 
 本步骤完成后，前端已经能和后端跑通"注册 → 登录 → 主界面 → 退出"的完整闭环，刷新页面也能恢复登录态。
 
+### 13. 实现记账接口与主界面本月收支汇总
+
+在 `backend/routers/items.py` 中实现交易、账户、分类的接口和月度汇总，并在 `backend/main.py` 中注册路由；前端在 `frontend/src/components/DashboardView.vue` 中读取本月汇总，通过 `frontend/src/components/SummaryCards.vue` 显示结余、收入和支出。交易表单、交易列表和月份切换留到后续步骤。
+
+1. 所有记账接口都通过 `Depends(get_current_user)` 取得当前用户，查询和写入时都带上 `user_id` 条件，避免读到或改到其他用户的数据。
+
+2. 封装 `owned_resource()`，按"资源编号 + 当前用户"查询账户或分类，查不到统一返回 404；查询时加 `with_for_update()`，避免校验通过之后资源被并发删除。
+
+3. 封装 `validate_references()`：新增或修改流水前先校验账户和分类都属于当前用户，并且分类的 `money_type` 与流水的收支类型一致，不一致返回 422。
+
+4. 交易接口：`GET /api/transactions` 查询当前用户的全部流水，`POST /api/transactions` 新增，`POST /api/transactions/{transaction_id}` 更新，`DELETE /api/transactions/{transaction_id}` 删除。更新沿用 POST，删除返回 204。
+
+5. 账户接口 `/api/accounts` 和分类接口 `/api/categories` 各自提供查询、新增、更新、删除。分类名在数据库中有 `(user_id, name_categories)` 唯一约束，新增或改名冲突时由 `commit_session()` 转成 409 和中文提示。
+
+6. 删除账户或分类时数据库外键是 `ON DELETE RESTRICT`，如果名下已有流水会触发完整性错误，同样由 `commit_session()` 转成 409"账户已有流水，不能删除"。
+
+7. 修改分类的收支类型前先检查该分类是否已有流水，有则返回 409，避免历史流水的类型与分类对不上。
+
+8. 新增 `GET /api/transactions/{year}/{month}`，按年月查询流水，结果按 `transaction_date`、`id` 倒序返回，供后续交易列表使用。
+
+9. 新增 `GET /api/summary`，接收可选的 `year` 和 `month`：两者必须同时提供，只给一个返回 422；都不提供时使用数据库的当前年月。按当前用户和指定年月分别统计收入与支出，返回：
+
+   ```json
+   {"money_in": 1000, "money_out": 300, "money_sum": 700}
+   ```
+
+   `money_sum` 为收入减支出，可以为负数；没有交易时 `SUM` 返回 `NULL`，用 `or 0` 兜底成 0。统计必须带 `user_id` 条件，否则会把其他用户的流水算进来。
+
+10. 前端在 `frontend/src/types/index.ts` 中新增 `Summary` 类型，字段与接口返回保持一致：
+
+    ```ts
+    export interface Summary {
+      money_in: number
+      money_out: number
+      money_sum: number
+    }
+    ```
+
+11. 在 `DashboardView.vue` 中定义 `summary`、`isSummaryLoading` 和 `summaryError`，分别保存汇总结果、加载状态和错误提示。汇总初始值为 `null`，不把尚未读取的数据当作真实的零收入、零支出。
+
+12. 编写 `loadSummary(year, month)`，用 `request<Summary>()` 请求 `/api/summary?year=年份&month=月份`；请求前清空错误并进入加载状态，成功后保存响应，失败时用 `errorMessage()` 取提示，在 `finally` 中结束加载。该接口需要登录，沿用 `requiresAuth` 的默认值，401 继续交给 `App.vue` 中已有的登录过期回调。
+
+13. 主界面挂载时用 `new Date()` 取浏览器本地年份和月份发起请求；`getMonth()` 返回 0–11，传给后端时需要加 1。本步骤固定查看本月。
+
+14. `SummaryCards.vue` 通过 props 接收 `summary`、`isLoading`、`errorMessage` 和 `periodLabel`，按结余、收入、支出的顺序显示三张卡片。金额用 `formatMoney()` 格式化为人民币符号加两位小数；加载时显示“读取中…”，出错或还没有数据时显示“—”，只有接口成功返回时才显示金额（含 `¥0.00` 和负结余）。样式使用 `var(--sage)`、`var(--line)` 等全局变量，窄屏下改为两列和单列。
+
+15. 账户、分类、交易的新增、编辑、删除接口已经写好，但前端还没有调用方，尚未联调；`GET /api/transactions/{year}/{month}` 同理。
+
+本步骤完成"记账接口 + 本月汇总展示"。下一步接交易列表、交易表单和月份切换；接口是否真的可用需要在后端连接 MySQL 后用 `/docs` 或页面手动验证。
 
