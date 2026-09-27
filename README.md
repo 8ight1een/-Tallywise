@@ -354,3 +354,35 @@ python -m uvicorn main:app --reload
 
 本步骤完成"记账接口 + 本月汇总展示"。下一步接交易列表、交易表单和月份切换；接口是否真的可用需要在后端连接 MySQL 后用 `/docs` 或页面手动验证。
 
+### 14. 实现交易记录列表与月份切换
+
+在 `frontend/src/components/TransactionList.vue` 中展示所选月份的交易记录，在 `frontend/src/components/MonthPicker.vue` 中提供月份切换，并在 `frontend/src/components/DashboardView.vue` 中让汇总卡片和记录列表按同一个月份联动加载。后端沿用第 13 点已经写好的 `/api/transactions/{year}/{month}` 和 `/api/categories`。
+
+1. 在 `frontend/src/types/index.ts` 中新增接口类型：`MoneyType` 用字面量联合约束为 `'收入' | '支出'`，`MonthSelection` 用 `'current' | 1 | 2 | … | 12` 同时表示"本月"和具体月份，另外定义 `Category` 和 `Transaction`。
+
+2. `Transaction.money` 声明为 `number | string`：金额经过 JSON 序列化后类型并不稳定，展示前统一转换，避免对接口返回做过于乐观的类型假设。
+
+3. `MonthPicker.vue` 用 props 的 `modelValue` 加 `update:modelValue` 事件实现 `v-model`。选项数组由"本月"和 1–12 月组成，上下箭头按钮按 `selectedIndex` 前后移动，到达边界或 `disabled` 为真时禁用按钮。
+
+4. `DashboardView.vue` 用 `selectedPeriod` 保存当前选择，用 `computed` 的 `periodLabel` 把 `'current'` 转成"本月"、把数字转成"N月"，同一个标签同时用于汇总卡片和记录面板标题。
+
+5. 用 `getQueryPeriod()` 统一算出请求用的 `{ year, month }`：年份取 `new Date().getFullYear()`，选择"本月"时用 `getMonth() + 1`，选择具体月份时直接用该数字。
+
+6. `changePeriod()` 在 `isSummaryLoading` 或 `isTransactionsLoading` 为真时直接返回，值没有变化时也返回，避免连续点击产生交叉请求或重复加载。
+
+7. `loadTransactions(year, month)` 用 `Promise.all` 并行请求三件事：所选月份的流水、`money_type=收入` 的分类、`money_type=支出` 的分类。中文查询参数用 `encodeURIComponent` 编码，取回后把两组分类合并成一个数组，供列表按 `category_id` 查找名称。
+
+8. `refreshFinancialData()` 把汇总和记录放在一起刷新，`onMounted` 时调用；切换月份后两者同时更新，保证卡片数字和列表内容属于同一个月。
+
+9. `TransactionList.vue` 通过 props 接收 `transactions`、`categories`、`isLoading`、`errorMessage`、`selectedPeriod` 和 `isPeriodLoading`，通过 `month-change` 事件把月份变化交回父组件；列表组件本身不直接发请求，数据和状态都由父组件维护。
+
+10. 分类名用 `categories.find()` 按 `category_id` 映射，找不到时显示"未知分类"；这样即使分类被删除，历史记录也不会出现空白。
+
+11. 面板右上角提供"全部 / 支出 / 收入"三个筛选项，用 `computed` 在已经取回的记录上过滤，属于纯前端筛选，不会重新请求接口。
+
+12. 空状态分开处理：加载中显示"正在读取记录……"，请求失败显示错误提示，没有数据时区分"该月份暂无记录"和"当前筛选下暂无记录"。
+
+13. 组件样式写在 scoped `<style>` 中，颜色和边框沿用 `main.css` 中的 `var(--line)`、`var(--card)`、`var(--muted)`、`var(--sage)`、`var(--rose)` 等变量，不重复定义主题色。
+
+本步骤只做展示：还没有新增、编辑、删除入口，第 13 点写好的增删改接口仍未被前端调用；记录里也没有显示所属账户；月份切换只换"月"，年份固定取当前年份，跨年查看留到后续步骤。
+
