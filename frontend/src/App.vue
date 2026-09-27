@@ -1,11 +1,21 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { ref } from 'vue'
+import LoginForm from './components/LoginForm.vue'
+import type { User } from './types'
+
+const currentUser = ref<User | null>(null)
+
+function handleLoginSuccess(user: User) {
+  currentUser.value = user
+}
+</script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
+  <LoginForm v-if="currentUser === null" @login-success="handleLoginSuccess" />
+  <div v-else class="auth-screen">
+    <div class="auth-card">
+      <h1>登录成功</h1>
+      <p>{{ currentUser.nickname || currentUser.email }}，欢迎回来。</p>
+    </div>
+  </div>
 </template>
-
-<style scoped></style>

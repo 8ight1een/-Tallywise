@@ -231,3 +231,49 @@ python -m uvicorn main:app --reload
 9. 修改代理配置后需要重启开发服务器才会生效。可以在浏览器控制台用 `fetch('/api/...')` 验证请求能否到达后端，以及响应头中的 `Set-Cookie` 是否被浏览器保存。
 
 本步骤只配置开发代理并封装请求工具，页面调用留到下一步。
+
+
+### 11. 实现前端登录页
+
+在 `frontend/src/components/LoginForm.vue` 中实现登录表单，由 `frontend/src/App.vue` 根据当前登录用户切换登录页和主界面。本步骤先用组件状态控制显示，暂不引入 vue-router。
+
+1. 在 `frontend/src/types/index.ts` 中定义接口数据类型，与后端返回保持一致：
+
+   ```ts
+   export interface User {
+     id: number
+     email: string
+     nickname: string | null
+   }
+
+   export interface LoginResponse {
+     message: string
+     user: User
+   }
+   ```
+
+2. 后端 `POST /api/auth/login` 需要返回登录结果，登录成功的响应体为：
+
+   ```json
+   {"message": "登录成功", "user": {"id": 1, "email": "me@example.com", "nickname": "测试"}}
+   ```
+
+   登录接口此前只写入 Cookie、没有返回值，前端会拿到 `null`，读取 `user` 时直接抛错。
+
+3. 在 `LoginForm.vue` 中定义 `email`、`password`、`isLoading`、`errorMessage` 四个响应式状态，输入框用 `v-model` 绑定，表单用 `@submit.prevent="handleLogin"` 阻止默认提交跳转。
+
+4. 组件通过 props 接收 `initialEmail` 和 `notice`，邮箱输入框用前者初始化，后者用于显示"注册成功，请重新登录"之类的提示；通过 `defineEmits` 声明 `loginSuccess` 事件，把登录结果交给父组件。
+
+5. 使用 `request<LoginResponse>()` 调用登录接口，传入 `method: 'POST'`、`json` 请求体和 `fallbackMessage` 默认提示，并用泛型声明返回类型，避免把响应当成 `any` 使用。
+
+6. 登录接口是公开接口，调用时显式传入 `requireAuth: false`。否则密码错误返回的 401 会被当成"登录状态已失效"，触发未登录回调。
+
+7. 登录成功后清空密码框，调用 `resetApiSession()` 恢复会话状态，再通过 `emit('loginSuccess', user)` 把用户信息交给父组件。
+
+8. 登录失败时用 `errorMessage()` 取出后端返回的提示显示在表单上方，`isLoading` 为真时禁用提交按钮，避免重复提交。
+
+9. 在 `App.vue` 中用 `currentUser` 保存当前用户：为 `null` 时渲染 `LoginForm`，通过 `@login-success` 接收子组件事件；登录成功后渲染主界面，显示昵称或邮箱。
+
+10. 样式统一定义在 `frontend/src/assets/main.css`：登录页使用 `auth-screen`、`auth-card`、`auth-brand`、`brand-mark`、`auth-subtitle`、`auth-form`、`auth-submit`、`auth-error` 等类名，主界面使用 `app`、`header`、`user-info`、`greeting` 等类名，组件内不再重复写样式。`frontend/src/main.ts` 引入该样式文件，`frontend/index.html` 设置页面标题。
+
+本步骤只实现登录。注册、退出登录和主界面内容留到下一步。
