@@ -14,7 +14,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise ValueError('SECRET_KEY not set')
 
-ALGORITHMS = ['HS256']
+
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 hasher_tool=PasswordHash.recommended()
@@ -30,14 +30,14 @@ def verify_password(plain_password:str, hashed_password:str) -> bool:
 
 def create_access_token(user_id:int) -> str:
     payload = {
-        'sub': user_id,
+        'sub': str(user_id),
         'exp': datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     }
 
     return jwt.encode(
         payload,
         SECRET_KEY,
-        algorithm=ALGORITHMS
+        algorithm='HS256'
     )
 
 async def get_current_user(
