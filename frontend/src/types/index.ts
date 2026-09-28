@@ -24,6 +24,11 @@ export interface Category {
   name_categories: string
 }
 
+export interface Account {
+  id: number
+  name_accounts: string
+}
+
 export interface Transaction {
   id: number
   account_id: number

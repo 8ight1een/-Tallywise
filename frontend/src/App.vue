@@ -37,7 +37,7 @@ async function checkCurrentUser() {
 }
 
 async function logout() {
-  isLoggingOut.value = true //为了防止用户多次点击按钮
+  isLoggingOut.value = true
 
   try {
     await request('/api/auth/logout', { method: 'POST', requiresAuth: false })

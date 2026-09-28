@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { request, errorMessage } from '../api/client'
 import SummaryCards from './SummaryCards.vue'
 import TransactionList from './TransactionList.vue'
+import TransactionForm from './TransactionForm.vue'
 import type { User, Summary, Transaction, Category, MonthSelection } from '../types'
 
 defineProps<{
@@ -25,6 +26,8 @@ const transactions = ref<Transaction[]>([])
 const categories = ref<Category[]>([])
 const isTransactionsLoading = ref(true)
 const transactionsError = ref('')
+let summaryRequestVersion = 0
+let transactionsRequestVersion = 0
 
 function getQueryPeriod() {
   const now = new Date()
@@ -35,20 +38,24 @@ function getQueryPeriod() {
 }
 
 async function loadSummary(year: number, month: number) {
+  const version = ++summaryRequestVersion
   isSummaryLoading.value = true
   summaryError.value = ''
 
   try {
-    summary.value = await request<Summary>(`/api/summary?year=${year}&month=${month}`)
+    const result = await request<Summary>(`/api/summary?year=${year}&month=${month}`)
+    if (version === summaryRequestVersion) summary.value = result
   } catch (error) {
     console.error(error)
-    summaryError.value = errorMessage(error, '读取月度汇总失败。')
+    if (version === summaryRequestVersion)
+      summaryError.value = errorMessage(error, '读取月度汇总失败。')
   } finally {
-    isSummaryLoading.value = false
+    if (version === summaryRequestVersion) isSummaryLoading.value = false
   }
 }
 
 async function loadTransactions(year: number, month: number) {
+  const version = ++transactionsRequestVersion
   isTransactionsLoading.value = true
   transactionsError.value = ''
 
@@ -58,13 +65,16 @@ async function loadTransactions(year: number, month: number) {
       request<Category[]>(`/api/categories?money_type=${encodeURIComponent('收入')}`),
       request<Category[]>(`/api/categories?money_type=${encodeURIComponent('支出')}`),
     ])
-    transactions.value = records
-    categories.value = [...incomeCategories, ...expenseCategories]
+    if (version === transactionsRequestVersion) {
+      transactions.value = records
+      categories.value = [...incomeCategories, ...expenseCategories]
+    }
   } catch (error) {
     console.error(error)
-    transactionsError.value = errorMessage(error, '读取交易记录失败。')
+    if (version === transactionsRequestVersion)
+      transactionsError.value = errorMessage(error, '读取交易记录失败。')
   } finally {
-    isTransactionsLoading.value = false
+    if (version === transactionsRequestVersion) isTransactionsLoading.value = false
   }
 }
 
@@ -125,14 +135,35 @@ onMounted(refreshFinancialData)
       :period-label="periodLabel"
     />
 
-    <TransactionList
-      :transactions="transactions"
-      :categories="categories"
-      :is-loading="isTransactionsLoading"
-      :error-message="transactionsError"
-      :selected-period="selectedPeriod"
-      :is-period-loading="isSummaryLoading || isTransactionsLoading"
-      @month-change="changePeriod"
-    />
+    <section class="content">
+      <TransactionForm
+        :is-refreshing="isSummaryLoading || isTransactionsLoading"
+        @created="refreshFinancialData"
+      />
+      <TransactionList
+        :transactions="transactions"
+        :categories="categories"
+        :is-loading="isTransactionsLoading"
+        :error-message="transactionsError"
+        :selected-period="selectedPeriod"
+        :is-period-loading="isSummaryLoading || isTransactionsLoading"
+        @month-change="changePeriod"
+      />
+    </section>
   </main>
 </template>
+
+<style scoped>
+.content {
+  display: grid;
+  grid-template-columns: 350px minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+}
+
+@media (max-width: 820px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
