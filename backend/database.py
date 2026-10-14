@@ -5,13 +5,12 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 
 DATABASE_URL =URL.create(
-    drivername='mysql+aiomysql',
+    drivername='postgresql+asyncpg',
     username=os.getenv("DATABASE_USERNAME"),
     password=os.getenv("DATABASE_PASSWORD"),
     host=os.getenv("DATABASE_HOST"),
     database=os.getenv("DATABASE_NAME"),
-    port=3306,
-    query={"charset": "utf8"}
+    port=5432,
 )
 
 engine = create_async_engine(

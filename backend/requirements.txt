@@ -2,7 +2,9 @@ fastapi
 uvicorn[standard]
 SQLAlchemy
 aiomysql
+asyncpg
 python-dotenv
 PyJWT
 pwdlib[argon2]
 email-validator
+cryptography
