@@ -1,11 +1,12 @@
 #  Tallywise
 
-个人记账学习项目，目前使用FastAPI，SQLALchemy,MySQL。
+个人记账学习项目，目前使用 FastAPI、SQLAlchemy 和 PostgreSQL。前期使用 MySQL，切换过程记录在第 17 节。
 该项目因家人需求而创造，并会根据用户使用反馈进行迭代，也会根据本人技术栈的更新来迭代。
 
 
 ## 目录
 - `database/schema.sql`:MySQL建表脚本
+- `database/schema_pg.sql`：PostgreSQL 建表脚本
 - `backend/`：后端源码、依赖清单
 - `frontend/`:前端源码
 
@@ -448,3 +449,33 @@ python -m uvicorn main:app --reload
 13. 这一步的代码检查包括 TypeScript、ESLint、内存构建和模拟接口验证。我把模拟检查与真实联调分开记录：还需要在连接 MySQL 的页面中验证修改金额、收支类型和日期，取消编辑，删除确认与取消，以及接口失败后重试；不能仅凭模拟响应就写成数据库联调已经完成。
 
 到这里，把新增、查询、编辑、删除的前端入口接齐了，也进一步区分了“子组件发事件”“父组件管理状态”和“后端真正保存数据”的职责。账户和分类的完整管理、跨年查看暂时不放进这一步，实际运行结果仍以真实接口验证为准。
+
+### 17. 创建 PostgreSQL 数据库并切换后端数据库连接
+
+这一步把后端使用的数据库从 MySQL 切换到 PostgreSQL，从空库重新开始，不迁移原来的账号和记账数据。先建立与现有后端匹配的表，再修改连接配置和驱动，最后通过真实数据库验证接口。前面 MySQL 相关章节保留为学习过程记录。
+
+1. 在 PostgreSQL 中创建目标数据库，准备有相应权限的连接账号，连接到目标库后执行 `database/schema_pg.sql`，建立 `users`、`accounts`、`categories`、`transactions` 四张表。脚本只负责建表和索引，不创建数据库或账号，也不会自动更新已经存在的表。
+
+2. 对照 `backend/model.py` 统一字段类型：主键和外键使用 `INT`，自增主键使用 `GENERATED ALWAYS AS IDENTITY`；邮箱、密码哈希、昵称、账户名、分类名和备注的长度与 ORM 模型一致。
+
+3. 保持原有金额规则：收入、支出都存正数，通过 `money_type` 区分，金额使用 `NUMERIC(9, 2)` 并添加 `CHECK (money > 0)`。最初的 PG 脚本把支出限制成负数，与请求模型的 `gt=0` 和汇总中的“收入减支出”冲突，因此修正脚本，不改变后端的计算规则。
+
+4. `transaction_date` 使用 `DATE NOT NULL`，对应请求模型的 `date` 和 ORM 的 `Date`；`created_at` 使用 `TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()`，对应当前不带时区的 `DateTime`。这是按现有后端选择的类型，不代表所有 PostgreSQL 项目都应该去掉时区。
+
+5. 保留邮箱唯一、同一用户分类名唯一，以及收支类型只能为“收入”或“支出”的约束；去掉最初 PG 脚本额外添加的昵称唯一、同一用户账户名唯一限制。外键删除规则沿用原 MySQL 表的 `RESTRICT`，已有流水引用的账户和分类不能直接删除。
+
+6. 根据当前查询建立索引：`accounts(user_id)` 用于按用户查账户；`transactions(user_id, transaction_date)` 对应用户流水查询和日期排序；`transactions(account_id)`、`transactions(category_id)` 对应关联检查。索引是否带来性能收益仍需看执行计划，当前月份查询使用 `EXTRACT()`，后续可以改成起止日期范围查询再验证。
+
+7. 在 `backend/requirements.txt` 中加入 `asyncpg`，并在运行后端的虚拟环境中安装依赖。依赖清单暂时保留 `aiomysql` 和已有的其他依赖，实际使用哪个数据库驱动由连接 URL 决定，不会因为两个驱动都安装就同时连接两个数据库。
+
+8. 修改 `backend/database.py`：把 `drivername` 从 `mysql+aiomysql` 改为 `postgresql+asyncpg`，端口从 `3306` 改为 `5432`，移除原来的 `query={"charset": "utf8"}`。继续使用 `URL.create()`、`create_async_engine()` 和 `async_sessionmaker()`，保留连接池、会话依赖以及提交失败后的回滚处理。
+
+9. 在本地 `backend/.env` 中把 `DATABASE_USERNAME`、`DATABASE_PASSWORD`、`DATABASE_HOST`、`DATABASE_NAME` 换成 PG 的连接配置。`main.py` 在导入路由前加载该文件，修改后需要重启后端；端口目前仍写在 `database.py` 中，不会自动读取 `.env` 中新增的端口变量。`.env` 由 Git 忽略，不随代码提交。
+
+10. 现有注册登录、账户、分类和流水接口继续使用 SQLAlchemy 查询，本步骤没有重写路由或 ORM 模型。SQLAlchemy 会按数据库方言生成 SQL，但不能由此推断任意 MySQL 原生语句、事务行为或锁行为都能原样迁移；字段和业务规则仍要逐项核对。
+
+11. 使用当前配置连接真实 PG，核对实际表结构并执行四张表的 ORM 查询；通过进程内接口请求验证注册登录、账户和分类操作、流水增删改查、月度汇总及跨月修改。例如收入 100、支出 30 时结余为 70，把支出改为 40 后结余为 60；把支出移到下月后，本月和下月的汇总分别变化。
+
+12. 同时检查失败路径：重复分类返回 409，非法金额或收支类型不匹配返回 422，删除已有流水的账户或分类返回 409，跨用户读写受到限制。接口测试共用一个最终回滚的外层事务，测试记录未保留，自增编号可能出现正常跳号。此次验证覆盖真实 PG 读写，但不包含持久化提交、浏览器联调、部署环境、并发和性能测试；`/api/health` 本身没有查询数据库，不能单凭它成功就判断 PG 已连通。
+
+到这里，当前本地配置下的后端已经通过 PostgreSQL 核心接口验证。后续还需要在页面上完成实际联调，并把数据库切换、业务规则调整和性能优化分别验证。
