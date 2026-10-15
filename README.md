@@ -527,3 +527,29 @@ python -m uvicorn main:app --reload
 8. 本次主要调整代码职责，没有更换查询算法。按年月筛选仍使用 `EXTRACT()`，汇总仍执行两条查询，没有加入分页或性能优化。全部流水、账户列表、分类列表以及用户认证仍留在原路由中，不能把这一步描述成整个后端都已完成服务层拆分。
 
 到这里，记账写操作集中在 `ledger.py`，月度查询和汇总集中在 `reports.py`，路由通过传入当前用户和请求参数调用对应服务。后续增加报表调用方时，可以复用这些函数，并继续明确参数校验和会话管理由谁负责。
+
+### 20. 拆分普通列表查询与注册登录服务
+
+前两步已拆出记账写操作和月度查询，这一步继续把全部流水、账户列表、分类列表，以及注册登录中的业务逻辑移到服务层。同时提取共用的数据库约束识别函数，清理数据库模块中已经没有调用方的旧提交工具。
+
+1. 在 `services/ledger.py` 新增 `get_transactions_service()`、`get_accounts_service()` 和 `get_categories_service()`。三个函数接收数据库会话和当前用户编号，分类查询额外接收 `money_type`，保留原来的用户过滤和分类类型过滤，返回 ORM 记录列表。
+
+2. `routers/items.py` 中对应的三个 GET 接口改为调用服务，移除不再使用的 `select` 和记账 ORM 模型导入。接口路径、参数和返回方式没有改变，也没有顺便添加分页、排序或分类类型的新限制。
+
+3. 新建 `services/users.py`，提供 `register_user_service()` 和 `login_user_service()`。用户路由继续负责接收 Pydantic 请求模型和注入会话，服务负责查询用户、验证注册条件和检查密码，不负责设置浏览器 Cookie。
+
+4. 注册服务先对邮箱执行 `strip().lower()`，查询是否已注册；未注册时在线程池中执行密码哈希，再构造用户对象并提交。路由只返回用户编号、邮箱和昵称，不返回密码哈希。密码处理继续复用 `auth.py` 的辅助函数，没有更换密码算法。
+
+5. 注册不能只依赖“先查询、再插入”的检查：两个请求可能都查到邮箱尚不存在，因此仍由数据库唯一约束兜底。提交发生完整性错误时先回滚，只把 SQLSTATE 为 `23505` 且约束名为 `users_email_key` 的错误转换为“该邮箱已注册”；其他完整性错误继续向外抛出，避免误报原因。
+
+6. 登录服务同样规范化邮箱，查询用户并在线程池中验证密码。用户不存在或密码错误都抛出 `AuthenticationError("邮箱或密码错误")`，成功则返回用户对象。登录路由继续负责签发 JWT、设置 `access_token` Cookie，并返回原来的登录成功消息和用户信息。
+
+7. 在 `services/errors.py` 新增 `AuthenticationError`，在 `main.py` 注册对应处理器，将它转换成 HTTP 401 和 `{"detail": "错误说明"}`。注册中的业务冲突复用已有的 `BusinessConflictError`，仍由统一处理器转换成 409。
+
+8. 把 `is_constraint_violation()` 从 `ledger.py` 移到 `services/db_errors.py`，供记账服务和用户服务共同调用。判断方式继续使用 `IntegrityError.driver_exception`，同时匹配底层 PG 错误的 SQLSTATE 和约束名称，沿用 SQLAlchemy 2.1 的最低版本要求。
+
+9. 删除 `database.py` 中已经没有调用方的 `commit_session()`，同时移除该模块对 `IntegrityError` 和 FastAPI `HTTPException` 的导入。数据库模块保留连接、会话工厂和会话依赖；注册和记账写入的提交、失败回滚及具体业务错误转换由对应服务承担。
+
+10. 退出登录仍由路由删除 Cookie，`/api/auth/me` 仍通过 `get_current_user` 获取登录用户。`auth.py` 中的令牌校验、鉴权依赖和用户查询保留原实现，用户服务也仍复用其中的密码函数，因此本次没有把整个认证模块拆成完全独立的业务组件。
+
+到这里，普通记账查询和写入由 `ledger.py` 承担，月度查询由 `reports.py` 承担，注册登录业务由 `users.py` 承担，共用数据库错误判断放在 `db_errors.py`。路由继续管理请求参数、依赖和 HTTP 响应，Cookie 与 JWT 的签发入口保持在用户路由中。
