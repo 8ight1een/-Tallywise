@@ -1,35 +1,26 @@
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException,status,Path,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select,func
 
-from database import get_session, commit_session
+from database import get_session
 from model import Transaction, Account, Category, User
 from schemas import TransactionCreate, AccountCreate, CategoryCreate
 from auth import get_current_user
+from services.ledger import (
+    create_transaction_service,
+    update_transaction_service,
+    delete_transaction_service,
+    update_category_service,
+    create_category_service,
+    delete_category_service,
+    create_account_service,
+    update_account_service,
+    delete_account_service,
+)
 
 
 
 router = APIRouter(prefix="/api", tags=["记账接口"])
-
-async def owned_resource(db, model, resource_id, user_id):
-    result = await db.execute(
-        select(model).where(model.id == resource_id, model.user_id == user_id).with_for_update()
-    )
-    resource = result.scalar_one_or_none()
-    if resource is None:
-        raise HTTPException(status_code=404, detail="账户或分类不存在")
-    return resource
-
-
-async def validate_references(db, data, user_id):
-    await owned_resource(db, Account, data.account_id, user_id)
-    category = await owned_resource(db, Category, data.category_id, user_id)
-    if category.money_type != data.money_type:
-        raise HTTPException(status_code=422, detail="分类与流水的收支类型不一致")
-
-
-
 
 
 @router.get("/health")
@@ -79,21 +70,15 @@ async def get_categories(
 #增
 @router.post("/transactions")
 async def add_transactions(
-        data: TransactionCreate,
-        db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+    data: TransactionCreate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    await validate_references(db, data, current_users.id)
-    transaction_obj = Transaction(
-        **data.model_dump(),
-        user_id=current_users.id,
-        created_at=datetime.now()
+    return await create_transaction_service(
+        db=db,
+        data=data,
+        user_id=current_user.id,
     )
-
-    db.add(transaction_obj)
-    await db.commit()
-
-    return transaction_obj
 
 
 @router.post("/accounts")
@@ -102,16 +87,11 @@ async def add_account(
     db: AsyncSession = Depends(get_session),
     current_users: User = Depends(get_current_user)
 ):
-    account = Account(
+    return await create_account_service(
+        db=db,
+        data=data,
         user_id=current_users.id,
-        name_accounts=data.name_accounts
     )
-
-    db.add(account)
-    await db.commit()
-    await db.refresh(account)
-
-    return account
 
 
 @router.post("/categories")
@@ -120,17 +100,11 @@ async def add_category(
     db: AsyncSession = Depends(get_session),
     current_users: User = Depends(get_current_user)
 ):
-    category = Category(
-        user_id=current_users.id,
-        name_categories=data.name_categories,
-        money_type=data.money_type
+    return await create_category_service(
+        db=db,
+        data=data,
+        user_id=current_users.id
     )
-
-    db.add(category)
-    await commit_session(db, "该分类名称已存在")
-    await db.refresh(category)
-
-    return category
 
 
 
@@ -141,28 +115,15 @@ async def update_transaction(
     transaction_id: int,
     data: TransactionCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id,
-            Transaction.user_id ==current_users.id
-        )
+    return await update_transaction_service(
+        db=db,
+        data=data,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
     )
-    transaction = result.scalar_one_or_none()
 
-    if transaction is None:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    await validate_references(db, data, current_users.id)
-    transaction.account_id = data.account_id
-    transaction.category_id = data.category_id
-    transaction.money = data.money
-    transaction.money_type = data.money_type
-    transaction.description = data.description
-    transaction.transaction_date = data.transaction_date
-    await db.commit()
-    return transaction
 
 
 @router.post("/accounts/{account_id}")
@@ -172,19 +133,12 @@ async def update_account(
         db: AsyncSession = Depends(get_session),
         current_users: User = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Account).where(
-            Account.id == account_id,
-            Account.user_id == current_users.id
-        )
+    return await update_account_service(
+        db=db,
+        data=data,
+        account_id=account_id,
+        user_id=current_users.id,
     )
-
-    account = result.scalar_one_or_none()
-    if account is None:
-        raise HTTPException(status_code=404, detail="Account not found")
-    account.name_accounts = data.name_accounts
-    await db.commit()
-    return account
 
 
 @router.post("/categories/{category_id}")
@@ -192,22 +146,15 @@ async def update_category(
         category_id: int,
         data: CategoryCreate,
         db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_user)
 ):
-    category = await owned_resource(db, Category, category_id, current_users.id)
-    if category.money_type != data.money_type:
-        existing = await db.execute(
-            select(Transaction.id)
-            .where(Transaction.category_id == category_id)
-            .limit(1)
-            .with_for_update()
-        )
-        if existing.first() is not None:
-            raise HTTPException(status_code=409, detail="分类已有流水，不能修改收支类型")
-    category.name_categories = data.name_categories
-    category.money_type = data.money_type
-    await commit_session(db, "该分类名称已存在")
-    return category
+    return await update_category_service(
+        db=db,
+        data=data,
+        category_id=category_id,
+        user_id = current_user.id
+    )
+
 
 
 
@@ -218,19 +165,11 @@ async def delete_transaction(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == transaction_id,
-            Transaction.user_id ==current_user.id
-        )
+    return await delete_transaction_service(
+        db=db,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
     )
-    transaction = result.scalar_one_or_none()
-
-    if transaction is None:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
-    await db.delete(transaction)
-    await db.commit()
 
 
 @router.delete("/accounts/{account_id}")
@@ -239,9 +178,11 @@ async def delete_account(
         db: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user),
 ):
-    account = await owned_resource(db, Account, account_id, current_user.id)
-    await db.delete(account)
-    await commit_session(db, "账户已有流水，不能删除")
+    await delete_account_service(
+        db=db,
+        account_id=account_id,
+        user_id=current_user.id,
+    )
     return {"message": "Account deleted"}
 
 
@@ -251,9 +192,11 @@ async def delete_category(
         db: AsyncSession = Depends(get_session),
         current_user: User = Depends(get_current_user),
 ):
-    category = await owned_resource(db, Category, category_id, current_user.id)
-    await db.delete(category)
-    await commit_session(db, "分类已有流水，不能删除")
+    await delete_category_service(
+        db=db,
+        user_id=current_user.id,
+        category_id=category_id,
+    )
     return {"message": "Category deleted"}
 
 

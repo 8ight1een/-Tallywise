@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-SQLAlchemy
+SQLAlchemy>=2.1
 aiomysql
 asyncpg
 python-dotenv
