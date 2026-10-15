@@ -1,14 +1,17 @@
 import os
 
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from model import User
-from auth import hash_password,verify_password,ACCESS_TOKEN_EXPIRE_MINUTES,create_access_token,get_current_user
-from schemas import  UserCreate,UserLogin
-from sqlalchemy import   select
-from fastapi import Depends, HTTPException, APIRouter,Response
-from starlette.concurrency import run_in_threadpool
-from database import get_session,commit_session
 
+from auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    create_access_token,
+    get_current_user,
+)
+from database import get_session
+from model import User
+from schemas import UserCreate, UserLogin
+from services.users import register_user_service, login_user_service
 
 router = APIRouter(prefix="/api", tags=["用户"])
 
@@ -17,21 +20,12 @@ async def register(
         data:UserCreate,
         db: AsyncSession = Depends(get_session),
 ):
-    email = data.email.strip().lower()
-    result=await db.execute(select(User).where(User.email==email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=409,detail="该邮箱已注册")
-
-    new_user = User(
-        email=email,
-        password_hash=await run_in_threadpool(hash_password,data.password),
-        nickname=data.nickname,
+    new_user = await register_user_service(
+        db=db,
+        data=data,
     )
 
-    db.add(new_user)
-    await commit_session(db,"该邮箱已注册")
-
-    return{
+    return {
         "id": new_user.id,
         "email": new_user.email,
         "nickname": new_user.nickname,
@@ -40,23 +34,22 @@ async def register(
 
 @router.post("/auth/login")
 async def login(
-        data:UserLogin,
-        response: Response,
-        db: AsyncSession = Depends(get_session),
+    data: UserLogin,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
 ):
-    email = data.email.strip().lower()
-    result=await db.execute(select(User).where(User.email==email))
-    user = result.scalar_one_or_none()
-    if user is None or not await run_in_threadpool(verify_password,data.password,user.password_hash):
-        raise HTTPException(status_code=401,detail="邮箱或密码错误")
+    user = await login_user_service(
+        db=db,
+        data=data,
+    )
 
     response.set_cookie(
         key="access_token",
         value=create_access_token(user.id),
         httponly=True,
         samesite="lax",
-        secure=os.getenv("COOKIE_SECURE","false").lower() == "true",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES*60,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
     return {
@@ -64,8 +57,8 @@ async def login(
         "user": {
             "id": user.id,
             "email": user.email,
-            "nickname": user.nickname
-        }
+            "nickname": user.nickname,
+        },
     }
 
 @router.post("/auth/logout")

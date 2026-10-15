@@ -11,6 +11,36 @@ from services.errors import (
     ResourceNotFoundError,
     MoneyTypeMismatchError,
 )
+from services.db_errors import is_constraint_violation
+
+
+async def get_transactions_service(db: AsyncSession, user_id: int):
+    result = await db.execute(
+        select(Transaction).where(Transaction.user_id == user_id)
+    )
+    return result.scalars().all()
+
+
+async def get_accounts_service(db: AsyncSession, user_id: int):
+    result = await db.execute(
+        select(Account).where(Account.user_id == user_id)
+    )
+    return result.scalars().all()
+
+
+async def get_categories_service(
+    db: AsyncSession,
+    user_id: int,
+    money_type: str,
+):
+    result = await db.execute(
+        select(Category).where(
+            Category.user_id == user_id,
+            Category.money_type == money_type,
+        )
+    )
+    return result.scalars().all()
+
 
 async def owned_resource(db, model, resource_id, user_id):
     result = await db.execute(
@@ -42,18 +72,6 @@ async def validate_references(db, data, user_id):
         raise MoneyTypeMismatchError(
             "分类与流水的收支类型不一致"
         )
-
-
-def is_constraint_violation(
-    exc: IntegrityError,
-    sqlstate: str,
-    constraint_name: str,
-) -> bool:
-    db_error = exc.driver_exception
-    return (
-        getattr(db_error, "sqlstate", None) == sqlstate
-        and getattr(db_error, "constraint_name", None) == constraint_name
-    )
 
 
 def is_category_name_conflict(exc: IntegrityError) -> bool:

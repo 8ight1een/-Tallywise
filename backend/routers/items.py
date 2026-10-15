@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException,status,Path,Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from database import get_session
-from model import Transaction, Account, Category, User
+from model import User
 from schemas import TransactionCreate, AccountCreate, CategoryCreate
 from auth import get_current_user
 from services.ledger import (
+    get_transactions_service,
+    get_accounts_service,
+    get_categories_service,
     create_transaction_service,
     update_transaction_service,
     delete_transaction_service,
@@ -38,8 +40,10 @@ async def transactions(
         db: AsyncSession = Depends(get_session),
         current_users: User = Depends(get_current_user)
 ):
-    result=await db.execute(select(Transaction).where(Transaction.user_id == current_users.id))
-    return result.scalars().all()
+    return await get_transactions_service(
+        db=db,
+        user_id=current_users.id,
+    )
 
 
 @router.get("/accounts")
@@ -47,10 +51,10 @@ async def get_accounts(
         db: AsyncSession = Depends(get_session),
         current_users: User = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Account).where(Account.user_id == current_users.id)
+    return await get_accounts_service(
+        db=db,
+        user_id=current_users.id,
     )
-    return result.scalars().all()
 
 
 @router.get("/categories")
@@ -59,13 +63,11 @@ async def get_categories(
     db: AsyncSession = Depends(get_session),
     current_users: User = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Category).where(
-            Category.user_id == current_users.id,
-            Category.money_type == money_type
-        )
+    return await get_categories_service(
+        db=db,
+        user_id=current_users.id,
+        money_type=money_type,
     )
-    return result.scalars().all()
 
 
 

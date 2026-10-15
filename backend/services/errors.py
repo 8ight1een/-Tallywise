@@ -6,3 +6,6 @@ class MoneyTypeMismatchError(Exception):
 
 class BusinessConflictError(Exception):
     pass
+
+class AuthenticationError(Exception):
+    pass

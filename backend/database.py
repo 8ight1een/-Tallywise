@@ -1,8 +1,6 @@
 from sqlalchemy import URL
 import os
 from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker,AsyncSession
-from sqlalchemy.exc import IntegrityError
-from fastapi import HTTPException
 
 DATABASE_URL =URL.create(
     drivername='postgresql+asyncpg',
@@ -33,11 +31,3 @@ async def get_session():
             yield session
     except Exception:
         raise
-
-
-async def commit_session(session: AsyncSession,detail:str):
-    try:
-        await session.commit()
-    except IntegrityError:
-        await session.rollback()
-        raise HTTPException(status_code=409,detail=detail) from None

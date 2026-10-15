@@ -12,7 +12,8 @@ from fastapi.responses import JSONResponse
 from services.errors import (
     ResourceNotFoundError,
     MoneyTypeMismatchError,
-    BusinessConflictError
+    BusinessConflictError,
+    AuthenticationError,
 )
 
 app = FastAPI()
@@ -44,6 +45,16 @@ async def handle_business_conflict(
 ):
     return JSONResponse(
         status_code=409,
+        content={"detail": str(exc)},
+    )
+
+@app.exception_handler(AuthenticationError)
+async def handle_authentication_error(
+    _request: Request,
+    exc: AuthenticationError,
+):
+    return JSONResponse(
+        status_code=401,
         content={"detail": str(exc)},
     )
 
