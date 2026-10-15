@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException,status,Path,Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select,func
+from sqlalchemy import select
 
 from database import get_session
 from model import Transaction, Account, Category, User
@@ -17,7 +17,10 @@ from services.ledger import (
     update_account_service,
     delete_account_service,
 )
-
+from services.reports import (
+    get_transactions_by_month_service,
+    get_summary_service,
+)
 
 
 router = APIRouter(prefix="/api", tags=["记账接口"])
@@ -203,10 +206,10 @@ async def delete_category(
 #月总结
 @router.get("/summary")
 async def get_summary(
-        year: int | None = Query(default=None, ge=1, le=9999),
-        month: int | None = Query(default=None, ge=1, le=12),
-        db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+    year: int | None = Query(default=None, ge=1, le=9999),
+    month: int | None = Query(default=None, ge=1, le=12),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     if (year is None) != (month is None):
         raise HTTPException(
@@ -214,55 +217,23 @@ async def get_summary(
             detail="年份和月份必须一起提供",
         )
 
-    if year is None:
-        current_year = func.extract("year", func.now())
-        current_month = func.extract("month", func.now())
-
-    else:
-        current_year = year
-        current_month = month
-
-    month_out = select(func.sum(Transaction.money)).where(
-    Transaction.money_type == "支出",
-    func.extract("year", Transaction.transaction_date) == current_year,
-    func.extract("month",Transaction.transaction_date) == current_month,
-    Transaction.user_id ==current_users.id
+    return await get_summary_service(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
     )
-    out_result = await db.execute(month_out)
-    money_out = out_result.scalar_one_or_none() or 0
-
-    month_in=select(func.sum(Transaction.money)).where(
-    Transaction.money_type=="收入",
-    func.extract("year",Transaction.transaction_date)==current_year,
-    func.extract("month",Transaction.transaction_date)==current_month,
-    Transaction.user_id == current_users.id
-    )
-    in_result = await db.execute(month_in)
-    money_in=in_result.scalar_one_or_none() or 0
-
-
-    return{
-      "money_in":money_in,
-      "money_out":money_out,
-      "money_sum":money_in-money_out,
-    }
 
 @router.get("/transactions/{year}/{month}")
 async def get_transactions_by_month(
-    year: int=Path(...,ge=1,le=9999),
+    year: int = Path(..., ge=1, le=9999),
     month: int = Path(..., ge=1, le=12),
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    statement = (
-        select(Transaction)
-        .where(
-            Transaction.user_id == current_users.id,
-            func.extract("year", Transaction.transaction_date) == year,
-            func.extract("month", Transaction.transaction_date) == month,
-        )
-        .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+    return await get_transactions_by_month_service(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
     )
-
-    result = await db.execute(statement)
-    return result.scalars().all()
