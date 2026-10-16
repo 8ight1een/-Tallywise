@@ -3,7 +3,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_session
 from model import User
-from schemas import TransactionCreate, AccountCreate, CategoryCreate
+from schemas import (
+    TransactionCreate,
+    AccountCreate,
+    CategoryCreate,
+    TransactionOut,
+    AccountOut,
+    CategoryOut,
+    SummaryOut,
+    MessageOut,
+)
 from auth import get_current_user
 from services.ledger import (
     get_transactions_service,
@@ -28,14 +37,14 @@ from services.reports import (
 router = APIRouter(prefix="/api", tags=["记账接口"])
 
 
-@router.get("/health")
+@router.get("/health", response_model=MessageOut)
 def health_check():
     return {"message": "后端连接成功"}
 
 
 
 #查
-@router.get("/transactions")
+@router.get("/transactions", response_model=list[TransactionOut])
 async def transactions(
         db: AsyncSession = Depends(get_session),
         current_users: User = Depends(get_current_user)
@@ -46,7 +55,7 @@ async def transactions(
     )
 
 
-@router.get("/accounts")
+@router.get("/accounts", response_model=list[AccountOut])
 async def get_accounts(
         db: AsyncSession = Depends(get_session),
         current_users: User = Depends(get_current_user)
@@ -57,7 +66,7 @@ async def get_accounts(
     )
 
 
-@router.get("/categories")
+@router.get("/categories", response_model=list[CategoryOut])
 async def get_categories(
     money_type: str,
     db: AsyncSession = Depends(get_session),
@@ -73,7 +82,7 @@ async def get_categories(
 
 
 #增
-@router.post("/transactions")
+@router.post("/transactions", response_model=TransactionOut)
 async def add_transactions(
     data: TransactionCreate,
     db: AsyncSession = Depends(get_session),
@@ -86,7 +95,7 @@ async def add_transactions(
     )
 
 
-@router.post("/accounts")
+@router.post("/accounts", response_model=AccountOut)
 async def add_account(
     data: AccountCreate,
     db: AsyncSession = Depends(get_session),
@@ -99,7 +108,7 @@ async def add_account(
     )
 
 
-@router.post("/categories")
+@router.post("/categories", response_model=CategoryOut)
 async def add_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
@@ -115,7 +124,7 @@ async def add_category(
 
 
 #更
-@router.post("/transactions/{transaction_id}")
+@router.post("/transactions/{transaction_id}", response_model=TransactionOut)
 async def update_transaction(
     transaction_id: int,
     data: TransactionCreate,
@@ -131,7 +140,7 @@ async def update_transaction(
 
 
 
-@router.post("/accounts/{account_id}")
+@router.post("/accounts/{account_id}", response_model=AccountOut)
 async def update_account(
         account_id: int,
         data: AccountCreate,
@@ -146,7 +155,7 @@ async def update_account(
     )
 
 
-@router.post("/categories/{category_id}")
+@router.post("/categories/{category_id}", response_model=CategoryOut)
 async def update_category(
         category_id: int,
         data: CategoryCreate,
@@ -177,7 +186,7 @@ async def delete_transaction(
     )
 
 
-@router.delete("/accounts/{account_id}")
+@router.delete("/accounts/{account_id}", response_model=MessageOut)
 async def delete_account(
         account_id: int,
         db: AsyncSession = Depends(get_session),
@@ -191,7 +200,7 @@ async def delete_account(
     return {"message": "Account deleted"}
 
 
-@router.delete("/categories/{category_id}")
+@router.delete("/categories/{category_id}", response_model=MessageOut)
 async def delete_category(
         category_id: int,
         db: AsyncSession = Depends(get_session),
@@ -206,7 +215,7 @@ async def delete_category(
 
 
 #月总结
-@router.get("/summary")
+@router.get("/summary", response_model=SummaryOut)
 async def get_summary(
     year: int | None = Query(default=None, ge=1, le=9999),
     month: int | None = Query(default=None, ge=1, le=12),
@@ -226,7 +235,7 @@ async def get_summary(
         month=month,
     )
 
-@router.get("/transactions/{year}/{month}")
+@router.get("/transactions/{year}/{month}", response_model=list[TransactionOut])
 async def get_transactions_by_month(
     year: int = Path(..., ge=1, le=9999),
     month: int = Path(..., ge=1, le=12),

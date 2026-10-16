@@ -10,12 +10,12 @@ from auth import (
 )
 from database import get_session
 from model import User
-from schemas import UserCreate, UserLogin
+from schemas import UserCreate, UserLogin, UserOut, LoginOut, MessageOut
 from services.users import register_user_service, login_user_service
 
 router = APIRouter(prefix="/api", tags=["用户"])
 
-@router.post("/auth/register")
+@router.post("/auth/register", response_model=UserOut)
 async def register(
         data:UserCreate,
         db: AsyncSession = Depends(get_session),
@@ -32,7 +32,7 @@ async def register(
     }
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", response_model=LoginOut)
 async def login(
     data: UserLogin,
     response: Response,
@@ -61,7 +61,7 @@ async def login(
         },
     }
 
-@router.post("/auth/logout")
+@router.post("/auth/logout", response_model=MessageOut)
 async def logout(response: Response):
     response.delete_cookie("access_token")
 
@@ -69,7 +69,7 @@ async def logout(response: Response):
         "message": "已退出登录"
     }
 
-@router.get("/auth/me")
+@router.get("/auth/me", response_model=UserOut)
 async def get_me(
     current_user: User = Depends(get_current_user),
 ):

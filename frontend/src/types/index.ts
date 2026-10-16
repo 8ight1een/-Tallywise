@@ -10,9 +10,9 @@ export interface LoginResponse {
 }
 
 export interface Summary {
-  money_in: number
-  money_out: number
-  money_sum: number
+  money_in: number | string
+  money_out: number | string
+  money_sum: number | string
 }
 
 export type MoneyType = '收入' | '支出'

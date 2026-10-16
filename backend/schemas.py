@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field,EmailStr, StringConstraints
+from pydantic import BaseModel, Field,EmailStr, StringConstraints, ConfigDict
 from typing import Literal, Annotated
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
@@ -33,3 +33,54 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str = Field(min_length=1, max_length=32)
+
+
+#出参模型
+class OrmOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransactionOut(OrmOut):
+    id: int
+    account_id: int
+    category_id: int
+    money: Decimal
+    money_type: Literal["收入", "支出"]
+    description: str | None
+    transaction_date: date
+    created_at: datetime
+
+
+class AccountOut(OrmOut):
+    id: int
+    name_accounts: str
+    created_at: datetime
+
+
+class CategoryOut(OrmOut):
+    id: int
+    name_categories: str
+    money_type: Literal["收入", "支出"]
+    created_at: datetime
+
+
+class UserOut(OrmOut):
+    id: int
+    email: EmailStr
+    nickname: str | None
+
+
+
+class LoginOut(BaseModel):
+    message: str
+    user: UserOut
+
+
+class SummaryOut(BaseModel):
+    money_in: Decimal
+    money_out: Decimal
+    money_sum: Decimal
+
+
+class MessageOut(BaseModel):
+    message: str
