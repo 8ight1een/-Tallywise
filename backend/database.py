@@ -1,19 +1,20 @@
 from sqlalchemy import URL
-import os
-from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker,AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-DATABASE_URL =URL.create(
-    drivername='postgresql+asyncpg',
-    username=os.getenv("DATABASE_USERNAME"),
-    password=os.getenv("DATABASE_PASSWORD"),
-    host=os.getenv("DATABASE_HOST"),
-    database=os.getenv("DATABASE_NAME"),
-    port=5432,
+from config import settings
+
+DATABASE_URL = URL.create(
+    drivername="postgresql+asyncpg",
+    username=settings.database_username,
+    password=settings.database_password,
+    host=settings.database_host,
+    database=settings.database_name,
+    port=settings.database_port,
 )
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=settings.sql_echo,
     pool_size=10,
     max_overflow=10,
     pool_pre_ping=True,

@@ -1,4 +1,3 @@
-import os
 import jwt
 from jwt.exceptions import InvalidTokenError
 from fastapi import Depends, Cookie, HTTPException
@@ -9,10 +8,9 @@ from database import get_session
 from pwdlib import PasswordHash
 from pwdlib.exceptions import UnknownHashError
 from model import User
+from config import settings
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-if not SECRET_KEY:
-    raise ValueError('SECRET_KEY not set')
+SECRET_KEY = settings.secret_key
 
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 60

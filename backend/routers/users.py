@@ -1,4 +1,4 @@
-import os
+from config import settings
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ async def login(
         value=create_access_token(user.id),
         httponly=True,
         samesite="lax",
-        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        secure=settings.cookie_secure,
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
