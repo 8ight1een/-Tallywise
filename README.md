@@ -647,3 +647,27 @@ $env:TEST_DATABASE_NAME = "tallywise_test"
 执行计划对比中，查询某用户 2025 年 3 月的流水：旧查询的索引条件只有 `user_id`，读取该用户 1000 条记录后过滤掉 969 条；新查询的索引条件同时包含用户和日期上下界，索引扫描返回当月 31 条。收入、支出汇总也使用了日期范围索引条件，修改前后的查询结果一致。列表仍有增量排序，汇总仍需过滤收支类型。
 
 这些结果验证了本次模拟数据下索引范围的变化，不代表生产环境一定选择相同计划或获得固定倍数的提速。验证结束后已删除临时库，没有对现有业务数据库执行建表、清表或索引变更。
+
+### 24. 集中管理后端配置并增加启动校验
+
+之前数据库、认证和登录路由分别读取环境变量，`main.py` 还负责提前加载 `.env`。这一步新增 `backend/config.py`，使用 Pydantic Settings 统一读取和校验配置，让各模块共用 `settings`，同时把数据库端口和 SQL 日志开关改为可配置项。
+
+1. `Settings` 继承 `BaseSettings`，声明数据库主机、用户名、密码、库名、端口、JWT 签名密钥、Cookie Secure 开关和 SQL 日志开关。环境变量仍沿用 `DATABASE_HOST`、`SECRET_KEY` 等名字，使用时通过 `settings.database_host`、`settings.secret_key` 等属性读取。
+
+2. `.env` 路径按 `config.py` 自身所在目录定位，编码为 UTF-8，不依赖启动命令所在的目录。系统环境变量可以覆盖 `.env`，未提供的可选项使用默认值；读取优先级可参考 [Pydantic Settings 文档](https://docs.pydantic.dev/latest/concepts/pydantic_settings/#field-value-priority)。`extra="ignore"` 允许同一 `.env` 中保留 `TEST_DATABASE_NAME` 等非应用配置字段，但也意味着额外字段不会自动报错。
+
+3. `settings = Settings()` 在模块首次导入时构造配置。缺少必填字段、布尔值无法解析、端口不是整数等问题会在应用加载时抛出配置校验错误，不必等到处理请求才发现。配置不是每个请求重新读取，修改 `.env` 或进程环境后，需要重新加载应用才能生效。
+
+4. `database.py` 从 `settings` 组装 SQLAlchemy URL。`DATABASE_PORT` 默认 5432，范围限制为 1 到 65535；`SQL_ECHO` 默认 false，替代之前写死的 `echo=True`。需要排查 SQL 时可显式开启，但 SQL 参数也会进入日志。连接池大小、会话工厂和会话依赖保留原实现。
+
+5. `auth.py` 使用统一配置中的签名密钥，JWT 算法和有效期保持原样。`secret_key` 设置最小长度为 1，保留旧代码拒绝空字符串的行为，避免空密钥允许启动后才在登录签名时报错。这个检查只保证非空，不代表已经验证密钥随机性或强度。
+
+6. 登录路由使用 `settings.cookie_secure` 设置 Cookie 的 Secure 属性，默认 false。布尔配置由 Pydantic 解析，非法值直接报错；测试覆盖 `true`、`false`、`1`、`0`。`main.py` 移除原先的 `load_dotenv()`，应用配置加载统一由 `config.py` 承担；测试初始化仍保留自己的环境变量准备逻辑。
+
+7. 设置 `hide_input_in_errors=True`，防止配置校验异常的普通文本展示输入值。用虚构密钥复现并补充回归测试，确认缺少其他配置时错误文本不带出该密钥。这不会替代日志管理，也不意味着可以安全打印整个 `settings` 或结构化错误中的输入内容。
+
+8. `requirements.txt` 补充 `pydantic-settings==2.16.0`，避免本地已安装该包而干净环境按清单安装后无法导入。`.env.example` 同步增加 `DATABASE_PORT`、`SQL_ECHO` 及说明；真实 `.env` 没有修改或提交。
+
+9. 新增无注释的 `tests/test_config.py`，共 22 项用例，覆盖默认值、布尔转换、端口范围、必填字段、空密钥、错误文本、环境变量覆盖配置文件，以及测试库字段的兼容。启动测试使用虚构配置，从另一个目录导入应用，检查数据库、认证和登录模块读取同一配置，并确认端口、SQL 日志和 Cookie 开关传递到调用方；该测试不连接数据库。
+
+10. 本次完整后端测试 **114 项通过**，当前虚拟环境的 `pip check` 通过。集成测试使用随机新建的 PostgreSQL 18.6 临时库，完成后已删除。没有在全新虚拟环境重新安装依赖，也没有把配置加载通过等同于生产部署验证完成。
