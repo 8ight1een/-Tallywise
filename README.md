@@ -671,3 +671,47 @@ $env:TEST_DATABASE_NAME = "tallywise_test"
 9. 新增无注释的 `tests/test_config.py`，共 22 项用例，覆盖默认值、布尔转换、端口范围、必填字段、空密钥、错误文本、环境变量覆盖配置文件，以及测试库字段的兼容。启动测试使用虚构配置，从另一个目录导入应用，检查数据库、认证和登录模块读取同一配置，并确认端口、SQL 日志和 Cookie 开关传递到调用方；该测试不连接数据库。
 
 10. 本次完整后端测试 **114 项通过**，当前虚拟环境的 `pip check` 通过。集成测试使用随机新建的 PostgreSQL 18.6 临时库，完成后已删除。没有在全新虚拟环境重新安装依赖，也没有把配置加载通过等同于生产部署验证完成。
+
+### 25. 接入 Alembic 并对齐数据库结构
+
+这一步新增 Alembic 配置、迁移环境和版本脚本，让数据库结构变化有版本记录。同时补齐 ORM 中已有的约束、索引和主键生成方式，使模型、迁移创建的结构与 `database/schema_pg.sql` 保持一致。
+
+1. 新增 `backend/alembic.ini` 和 `backend/migrations/`。`env.py` 使用现有 `settings` 读取连接参数，迁移使用同步 `postgresql+psycopg` 驱动；后端请求继续使用 `asyncpg`。`target_metadata` 指向 `Base.metadata`，用于对照模型与数据库生成迁移建议。
+
+2. 迁移脚本和模块搜索路径都相对配置文件定位，支持从项目根目录传入 `-c backend/alembic.ini`。连接地址仍通过 SQLAlchemy `URL.create()` 构造，写入 Alembic 配置时把 `%` 转义为 `%%`，避免密码中的特殊字符经过 URL 编码后触发 ConfigParser 插值错误。配置文件中的示例 URL 不用于实际连接，也不写入真实密码。
+
+3. `model.py` 补充金额必须大于零、收支类型只能是收入或支出的 CHECK；补充账户用户索引和流水的用户日期、账户、分类索引；外键删除规则统一声明 `RESTRICT`。这些规则在原 SQL 中已经存在，本次主要是让 ORM 元数据完整表达它们。业务异常识别依赖的唯一约束和外键名称继续保持一致。
+
+4. 四张表的模型主键显式声明 `Identity(always=True)`，对应原 SQL 的 `GENERATED ALWAYS AS IDENTITY`。原始基线 `5e649e7423b5` 保持生成时的内容，负责创建四张表及约束、索引，但当时的自增主键是 SERIAL。由于该基线已经在测试库执行，不能直接改写它来假装所有数据库都已一致。
+
+5. 新增后续版本 `b27f4e9a6c10`：已有 ALWAYS Identity 主键时跳过；BY DEFAULT Identity 改为 ALWAYS；原 SERIAL 主键转换为 ALWAYS Identity。转换不重建业务表，已有 ID 保留；新序列的下一值取原序列下一值、表内最大 ID 加一和 1 的最大值，避免因已删除记录或手工插入 ID 导致自增编号回退、碰撞。
+
+6. 后续迁移针对 `public` schema，支持基线生成的步长为 1 的序列，遇到不符合预期的序列会报错。它在事务中先对四张业务表加独占锁，执行期间可能等待现有事务，也可能阻塞业务请求。回退到基线会统一恢复 SERIAL，包括原本就是 Identity 的库；它并不记录每个库升级前的个别形态。回退到 `base` 则删除四张业务表及数据。
+
+7. 本次用户说明：`tallywise` 只执行过 `stamp head`，`tallywise_test` 执行过基线 `upgrade head` 并创建了四张表。这里的 `head` 指当时的基线版本；新增迁移后，最新版本已变为 `b27f4e9a6c10`。本轮没有连接检查或迁移这两个现有库，不能把临时库验证结果当作它们已经升级完成。
+
+8. 空库可以从基线一路 `upgrade head`。已有手工建表的库，需要先核对字段、默认值、约束、索引和主键生成方式，再标记与实际结构相符的基线版本；`stamp` 只写版本记录，不验证或修复结构。已经标记或执行过基线的库，应通过后续升级对齐，不能再次 `stamp head` 跳过待执行的迁移。相关流程见 [Alembic 教程](https://alembic.sqlalchemy.org/en/latest/tutorial.html)。
+
+9. 后续流程是修改模型、生成迁移候选、人工检查 `upgrade()` 与 `downgrade()`、在隔离库验证后再执行。`--autogenerate` 和 `alembic check` 不是完整结构审计，尤其不能依赖它们自动识别所有 CHECK 变化、重命名或数据转换；详见 [自动生成迁移的限制](https://alembic.sqlalchemy.org/en/latest/autogenerate.html)。因此本次还直接对照了 PostgreSQL 系统目录中的字段、默认值、Identity、约束和索引。
+
+10. 新增两个离线迁移测试，覆盖从其他目录启动，以及普通密码和含特殊字符的密码。完整 **116 项测试通过**；这轮验证用临时测试插件保留 Alembic 建好的表再运行测试，没有让默认测试夹具用手写 SQL 重建它们。常规 pytest 的建表夹具仍使用 `schema_pg.sql`，因此日常测试通过不能单独证明新迁移可用。
+
+在随机新建的 PostgreSQL 18.6 临时库中，已验证旧基线升级、已有数据和自增进度保留、降级后再次升级、空库完整建表，以及手写 SQL 建库后标记基线再升级。最终结构与手写 SQL 的字段、约束、索引和 Identity 一致，`alembic check` 通过；另外生成离线 SQL 并在另一个临时库实际执行成功。临时库均已删除。
+
+以下命令在 `backend` 目录执行，连接目标由环境变量和 `.env` 决定。操作已有库前先确认目标、结构和备份，正式执行升级应安排合适的维护时间：
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m alembic heads
+.\.venv\Scripts\python.exe -m alembic history
+
+# 确认目标后，执行仍未应用的迁移
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic check
+```
+
+以后为模型变更生成迁移候选，在人工检查并补充必要的数据处理前，不应直接应用到需要保留数据的数据库：
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "说明本次结构变更"
+```
