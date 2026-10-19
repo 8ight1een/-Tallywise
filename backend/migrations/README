@@ -1,0 +1,16 @@
+PostgreSQL migrations for Tallywise.
+
+Run from backend with the project virtual environment, or specify
+-c backend/alembic.ini when running from the repository root.
+Connection settings come from config.py, not the placeholder URL in alembic.ini.
+
+5e649e7423b5 is the original baseline and must not be rewritten after use.
+b27f4e9a6c10 aligns SERIAL primary keys with GENERATED ALWAYS AS IDENTITY.
+
+Use upgrade head for an empty database. For existing tables, inspect the schema
+before stamping the matching revision; stamp does not create or validate tables.
+Do not stamp head to skip pending changes. See README.md section 25 for details.
+
+The identity migration targets public and locks all four business tables.
+Downgrading to the baseline converts identity columns to SERIAL.
+Downgrading to base deletes all four business tables and their data.
