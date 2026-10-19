@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException,status,Path,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,7 +70,7 @@ async def get_accounts(
 
 @router.get("/categories", response_model=list[CategoryOut])
 async def get_categories(
-    money_type: str,
+    money_type: Literal["收入", "支出"],
     db: AsyncSession = Depends(get_session),
     current_users: User = Depends(get_current_user)
 ):
@@ -124,7 +126,7 @@ async def add_category(
 
 
 #更
-@router.post("/transactions/{transaction_id}", response_model=TransactionOut)
+@router.put("/transactions/{transaction_id}", response_model=TransactionOut)
 async def update_transaction(
     transaction_id: int,
     data: TransactionCreate,
@@ -140,7 +142,7 @@ async def update_transaction(
 
 
 
-@router.post("/accounts/{account_id}", response_model=AccountOut)
+@router.put("/accounts/{account_id}", response_model=AccountOut)
 async def update_account(
         account_id: int,
         data: AccountCreate,
@@ -155,7 +157,7 @@ async def update_account(
     )
 
 
-@router.post("/categories/{category_id}", response_model=CategoryOut)
+@router.put("/categories/{category_id}", response_model=CategoryOut)
 async def update_category(
         category_id: int,
         data: CategoryCreate,

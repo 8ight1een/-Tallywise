@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +32,7 @@ async def get_accounts_service(db: AsyncSession, user_id: int):
 async def get_categories_service(
     db: AsyncSession,
     user_id: int,
-    money_type: str,
+    money_type: Literal["收入", "支出"],
 ):
     result = await db.execute(
         select(Category).where(
@@ -81,12 +82,28 @@ def is_category_name_conflict(exc: IntegrityError) -> bool:
     )
 
 
+# PostgreSQL 里"父行被引用所以删不掉"有两种 SQLSTATE，取决于外键怎么写的：
+#
+#   23001  restrict_violation      <- ON DELETE RESTRICT 触发（schema_pg.sql 用的就是这个）
+#   23503  foreign_key_violation   <- ON DELETE NO ACTION 触发（PostgreSQL 默认行为）
+#
+# 曾经这里只检查 23503，导致"分类/账户已有流水时删除"返回 500 而不是 409。
+# 两个都接受，这样将来改外键定义也不会漏。
+FK_IN_USE_SQLSTATES = ("23001", "23503")
+
+
 def is_category_in_use(exc: IntegrityError) -> bool:
-    return is_constraint_violation(exc, "23503", "transactions_category_id_fkey")
+    return any(
+        is_constraint_violation(exc, code, "transactions_category_id_fkey")
+        for code in FK_IN_USE_SQLSTATES
+    )
 
 
 def is_account_in_use(exc: IntegrityError) -> bool:
-    return is_constraint_violation(exc, "23503", "transactions_account_id_fkey")
+    return any(
+        is_constraint_violation(exc, code, "transactions_account_id_fkey")
+        for code in FK_IN_USE_SQLSTATES
+    )
 
 
 async def create_transaction_service(
