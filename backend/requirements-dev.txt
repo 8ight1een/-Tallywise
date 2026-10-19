@@ -1,4 +1,16 @@
+# 开发与测试依赖。生产部署只装 requirements.txt。
+#
+# 用法：
+#   本地开发 / CI   pip install -r requirements-dev.txt
+#   生产部署        pip install -r requirements.txt
+#
+# -r 表示先装生产依赖，再加下面的测试工具。
+
 -r requirements.txt
-pytest
-pytest-asyncio
-httpx2
+
+pytest==9.1.1
+# pytest.ini 里的 asyncio_mode / asyncio_default_fixture_loop_scope
+# 在不同版本间变动过，这里必须锁版本
+pytest-asyncio==1.4.0
+# starlette 的 TestClient 需要它（名字有点怪，但报错原文就是 httpx2）
+httpx2==2.13.1
