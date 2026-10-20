@@ -1,6 +1,6 @@
 type RequestOptions = Omit<RequestInit,'body'>&{
   json?:unknown
-  requireAuth?:boolean
+  requiresAuth?:boolean
   fallbackMessage?:string
 }
 
@@ -53,7 +53,7 @@ function detailMessage(data: unknown, fallback: string): string {
 
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { json, requireAuth = true, fallbackMessage = '请求失败,请稍后重试',...init } = options
+  const { json, requiresAuth = true, fallbackMessage = '请求失败,请稍后重试',...init } = options
   const version = sessionVersion
   const headers=new Headers(init.headers)
   if(json !== undefined) headers.set('Content-Type','application/json')
@@ -69,7 +69,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiRequestError("网络错误，请确认后端服务正在运行", 0)
   }
   if(!response.ok){
-    if(version === sessionVersion && requireAuth && response.status === 401&& !expired){
+    if(version === sessionVersion && requiresAuth && response.status === 401&& !expired){
       expired = true
       unauthorizedHandler?.()
     }
