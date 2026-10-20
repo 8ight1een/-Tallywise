@@ -1,7 +1,7 @@
 import asyncio
 import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
-
 
 from dotenv import load_dotenv
 
@@ -44,9 +44,7 @@ TABLES = ["transactions", "categories", "accounts", "users"]
 
 engine = create_async_engine(DATABASE_URL, poolclass=NullPool, echo=False)
 
-TestSessionLocal = async_sessionmaker(
-    engine, expire_on_commit=False, class_=AsyncSession
-)
+TestSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def _reset_schema() -> None:
@@ -63,9 +61,7 @@ async def _reset_schema() -> None:
 
 async def _truncate_all() -> None:
     async with engine.begin() as conn:
-        await conn.execute(
-            text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
-        )
+        await conn.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture(scope="session")
@@ -80,7 +76,7 @@ def prepare_database():
 
 
 @pytest.fixture
-async def db(prepare_database) -> AsyncSession:
+async def db(prepare_database) -> AsyncGenerator[AsyncSession]:
 
     await _truncate_all()
     async with TestSessionLocal() as session:
@@ -89,7 +85,7 @@ async def db(prepare_database) -> AsyncSession:
 
 async def _override_get_session():
 
-    async with TestSessionLocal() as session:
+    async with TestSessionLocal() as session, session.begin():
         yield session
 
 

@@ -1,7 +1,7 @@
 from datetime import date
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model import Transaction
@@ -28,7 +28,8 @@ async def get_transactions_by_month_service(
             Transaction.user_id == user_id,
             Transaction.transaction_date >= start_date,
             Transaction.transaction_date < end_date
-            if end_date is not None else Transaction.transaction_date <= date.max,
+            if end_date is not None
+            else Transaction.transaction_date <= date.max,
         )
         .order_by(
             Transaction.transaction_date.desc(),
@@ -49,8 +50,10 @@ async def get_summary_service(
     if (year is None) != (month is None):
         raise ValueError("年份和月份必须一起提供")
 
-    if year is None:
+    if year is None or month is None:
         today = await db.scalar(select(func.current_date()))
+        if today is None:
+            raise RuntimeError("无法获取当前日期")
         year, month = today.year, today.month
 
     start_date, end_date = month_range(year, month)
@@ -60,7 +63,8 @@ async def get_summary_service(
         Transaction.money_type == "支出",
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date < end_date
-        if end_date is not None else Transaction.transaction_date <= date.max,
+        if end_date is not None
+        else Transaction.transaction_date <= date.max,
     )
     out_result = await db.execute(month_out)
     money_out = out_result.scalar_one_or_none() or 0
@@ -70,7 +74,8 @@ async def get_summary_service(
         Transaction.money_type == "收入",
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date < end_date
-        if end_date is not None else Transaction.transaction_date <= date.max,
+        if end_date is not None
+        else Transaction.transaction_date <= date.max,
     )
     in_result = await db.execute(month_in)
     money_in = in_result.scalar_one_or_none() or 0

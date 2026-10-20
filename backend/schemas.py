@@ -1,12 +1,12 @@
-from pydantic import BaseModel, Field,EmailStr, StringConstraints, ConfigDict
-from typing import Literal, Annotated
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
 
-#请求模型
 class TransactionCreate(BaseModel):
     account_id: int = Field(gt=0)
     category_id: int = Field(gt=0)
@@ -27,15 +27,15 @@ class CategoryCreate(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str=Field(min_length=8, max_length=32)
+    password: str = Field(min_length=8, max_length=32)
     nickname: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
+
 
 class UserLogin(BaseModel):
     email: str
     password: str = Field(min_length=1, max_length=32)
 
 
-#出参模型
 class OrmOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,7 +68,6 @@ class UserOut(OrmOut):
     id: int
     email: EmailStr
     nickname: str | None
-
 
 
 class LoginOut(BaseModel):

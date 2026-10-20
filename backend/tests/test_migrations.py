@@ -1,7 +1,7 @@
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -22,8 +22,23 @@ def test_离线迁移支持其他启动目录和特殊字符密码(tmp_path, pas
         PYTHONIOENCODING="utf-8",
     )
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", str(backend / "alembic.ini"), "upgrade", "head", "--sql"],
-        cwd=tmp_path, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=15,
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            str(backend / "alembic.ini"),
+            "upgrade",
+            "head",
+            "--sql",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     sql = result.stdout
@@ -32,8 +47,17 @@ def test_离线迁移支持其他启动目录和特殊字符密码(tmp_path, pas
     assert "b27f4e9a6c10" in sql
     for table in ("users", "accounts", "categories", "transactions"):
         assert f"CREATE TABLE {table}" in sql
-    for index in ("idx_accounts_user", "idx_trans_user_date", "idx_trans_account", "idx_trans_category"):
+    for index in (
+        "idx_accounts_user",
+        "idx_trans_user_date",
+        "idx_trans_account",
+        "idx_trans_category",
+    ):
         assert f"CREATE INDEX {index}" in sql
-    for constraint in ("categories_money_type_check", "transactions_money_check", "transactions_money_type_check"):
+    for constraint in (
+        "categories_money_type_check",
+        "transactions_money_check",
+        "transactions_money_type_check",
+    ):
         assert f"CONSTRAINT {constraint} CHECK" in sql
     assert sql.count("ON DELETE RESTRICT") == 5

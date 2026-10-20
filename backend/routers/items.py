@@ -1,55 +1,56 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException,status,Path,Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import get_current_user
 from database import get_session
 from model import User
 from schemas import (
-    TransactionCreate,
     AccountCreate,
-    CategoryCreate,
-    TransactionOut,
     AccountOut,
+    CategoryCreate,
     CategoryOut,
-    SummaryOut,
     MessageOut,
+    SummaryOut,
+    TransactionCreate,
+    TransactionOut,
 )
-from auth import get_current_user
 from services.ledger import (
-    get_transactions_service,
+    create_account_service,
+    create_category_service,
+    create_transaction_service,
+    delete_account_service,
+    delete_category_service,
+    delete_transaction_service,
     get_accounts_service,
     get_categories_service,
-    create_transaction_service,
-    update_transaction_service,
-    delete_transaction_service,
-    update_category_service,
-    create_category_service,
-    delete_category_service,
-    create_account_service,
+    get_transactions_service,
     update_account_service,
-    delete_account_service,
+    update_category_service,
+    update_transaction_service,
 )
 from services.reports import (
-    get_transactions_by_month_service,
     get_summary_service,
+    get_transactions_by_month_service,
 )
-
 
 router = APIRouter(prefix="/api", tags=["记账接口"])
 
 
 @router.get("/health", response_model=MessageOut)
-def health_check():
+async def health_check(db: AsyncSession = Depends(get_session)):
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="数据库不可用") from exc
     return {"message": "后端连接成功"}
 
 
-
-#查
 @router.get("/transactions", response_model=list[TransactionOut])
 async def transactions(
-        db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_session), current_users: User = Depends(get_current_user)
 ):
     return await get_transactions_service(
         db=db,
@@ -59,8 +60,7 @@ async def transactions(
 
 @router.get("/accounts", response_model=list[AccountOut])
 async def get_accounts(
-        db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_session), current_users: User = Depends(get_current_user)
 ):
     return await get_accounts_service(
         db=db,
@@ -72,7 +72,7 @@ async def get_accounts(
 async def get_categories(
     money_type: Literal["收入", "支出"],
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user)
+    current_users: User = Depends(get_current_user),
 ):
     return await get_categories_service(
         db=db,
@@ -81,9 +81,6 @@ async def get_categories(
     )
 
 
-
-
-#增
 @router.post("/transactions", response_model=TransactionOut)
 async def add_transactions(
     data: TransactionCreate,
@@ -101,7 +98,7 @@ async def add_transactions(
 async def add_account(
     data: AccountCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user)
+    current_users: User = Depends(get_current_user),
 ):
     return await create_account_service(
         db=db,
@@ -114,24 +111,17 @@ async def add_account(
 async def add_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user)
+    current_users: User = Depends(get_current_user),
 ):
-    return await create_category_service(
-        db=db,
-        data=data,
-        user_id=current_users.id
-    )
+    return await create_category_service(db=db, data=data, user_id=current_users.id)
 
 
-
-
-#更
 @router.put("/transactions/{transaction_id}", response_model=TransactionOut)
 async def update_transaction(
     transaction_id: int,
     data: TransactionCreate,
     db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     return await update_transaction_service(
         db=db,
@@ -141,13 +131,12 @@ async def update_transaction(
     )
 
 
-
 @router.put("/accounts/{account_id}", response_model=AccountOut)
 async def update_account(
-        account_id: int,
-        data: AccountCreate,
-        db: AsyncSession = Depends(get_session),
-        current_users: User = Depends(get_current_user)
+    account_id: int,
+    data: AccountCreate,
+    db: AsyncSession = Depends(get_session),
+    current_users: User = Depends(get_current_user),
 ):
     return await update_account_service(
         db=db,
@@ -159,22 +148,16 @@ async def update_account(
 
 @router.put("/categories/{category_id}", response_model=CategoryOut)
 async def update_category(
-        category_id: int,
-        data: CategoryCreate,
-        db: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user)
+    category_id: int,
+    data: CategoryCreate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     return await update_category_service(
-        db=db,
-        data=data,
-        category_id=category_id,
-        user_id = current_user.id
+        db=db, data=data, category_id=category_id, user_id=current_user.id
     )
 
 
-
-
-#删
 @router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_transaction(
     transaction_id: int,
@@ -190,9 +173,9 @@ async def delete_transaction(
 
 @router.delete("/accounts/{account_id}", response_model=MessageOut)
 async def delete_account(
-        account_id: int,
-        db: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user),
+    account_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     await delete_account_service(
         db=db,
@@ -204,9 +187,9 @@ async def delete_account(
 
 @router.delete("/categories/{category_id}", response_model=MessageOut)
 async def delete_category(
-        category_id: int,
-        db: AsyncSession = Depends(get_session),
-        current_user: User = Depends(get_current_user),
+    category_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     await delete_category_service(
         db=db,
@@ -216,7 +199,6 @@ async def delete_category(
     return {"message": "Category deleted"}
 
 
-#月总结
 @router.get("/summary", response_model=SummaryOut)
 async def get_summary(
     year: int | None = Query(default=None, ge=1, le=9999),
@@ -236,6 +218,7 @@ async def get_summary(
         year=year,
         month=month,
     )
+
 
 @router.get("/transactions/{year}/{month}", response_model=list[TransactionOut])
 async def get_transactions_by_month(

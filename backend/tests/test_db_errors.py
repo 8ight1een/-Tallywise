@@ -6,7 +6,6 @@ from services.ledger import is_account_in_use, is_category_in_use
 
 
 class FakeDriverError(Exception):
-
     def __init__(self, sqlstate, constraint_name):
         super().__init__("fake driver error")
         self.sqlstate = sqlstate
@@ -14,9 +13,7 @@ class FakeDriverError(Exception):
 
 
 def make_integrity_error(sqlstate, constraint_name):
-    return IntegrityError(
-        "INSERT INTO users ...", {}, FakeDriverError(sqlstate, constraint_name)
-    )
+    return IntegrityError("INSERT INTO users ...", {}, FakeDriverError(sqlstate, constraint_name))
 
 
 def test_sqlstate和约束名都匹配才返回真():
@@ -39,10 +36,13 @@ def test_底层异常没有这些属性时也不崩():
     assert is_constraint_violation(exc, "23505", "users_email_key") is False
 
 
-@pytest.mark.parametrize("check,constraint", [
-    (is_account_in_use, "transactions_account_id_fkey"),
-    (is_category_in_use, "transactions_category_id_fkey"),
-])
+@pytest.mark.parametrize(
+    "check,constraint",
+    [
+        (is_account_in_use, "transactions_account_id_fkey"),
+        (is_category_in_use, "transactions_category_id_fkey"),
+    ],
+)
 @pytest.mark.parametrize("sqlstate", ["23001", "23503"])
 def test_删除引用冲突同时识别两种状态且限定约束(check, constraint, sqlstate):
     assert check(make_integrity_error(sqlstate, constraint)) is True

@@ -57,11 +57,14 @@ def test_未登录访问受保护接口返回401(client):
 
 
 def test_注册响应不包含密码哈希(client):
-    response = client.post("/api/auth/register", json={
-        "email": "leak@example.com",
-        "password": "password123",
-        "nickname": "泄露检查",
-    })
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "leak@example.com",
+            "password": "password123",
+            "nickname": "泄露检查",
+        },
+    )
     assert response.status_code == 200
 
     body = response.json()
@@ -94,13 +97,22 @@ def test_重复邮箱注册返回409(client):
 
 
 def test_密码错误返回401(client):
-    client.post("/api/auth/register", json={
-        "email": "wrongpw@example.com", "password": "password123", "nickname": "用户",
-    })
+    client.post(
+        "/api/auth/register",
+        json={
+            "email": "wrongpw@example.com",
+            "password": "password123",
+            "nickname": "用户",
+        },
+    )
 
-    response = client.post("/api/auth/login", json={
-        "email": "wrongpw@example.com", "password": "bad-password",
-    })
+    response = client.post(
+        "/api/auth/login",
+        json={
+            "email": "wrongpw@example.com",
+            "password": "bad-password",
+        },
+    )
     assert response.status_code == 401
 
 
@@ -126,7 +138,6 @@ def test_更新流水用的是PUT而不是POST(auth_client):
 
     updated = make_transaction_payload(account_id, category_id, money="20.00")
 
-
     assert auth_client.post(f"/api/transactions/{tid}", json=updated).status_code == 405
 
     response = auth_client.put(f"/api/transactions/{tid}", json=updated)
@@ -135,10 +146,13 @@ def test_更新流水用的是PUT而不是POST(auth_client):
     assert response.json()["money"] == "20.00"
 
 
-@pytest.mark.parametrize("resource,create,payload", [
-    ("accounts", create_account, {"name_accounts": "银行卡"}),
-    ("categories", create_category, {"name_categories": "交通", "money_type": "支出"}),
-])
+@pytest.mark.parametrize(
+    "resource,create,payload",
+    [
+        ("accounts", create_account, {"name_accounts": "银行卡"}),
+        ("categories", create_category, {"name_categories": "交通", "money_type": "支出"}),
+    ],
+)
 def test_更新账户和分类使用PUT(auth_client, resource, create, payload):
     resource_id = create(auth_client)
     url = f"/api/{resource}/{resource_id}"
@@ -166,9 +180,7 @@ def test_分类有流水时删除返回409(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    auth_client.post(
-        "/api/transactions", json=make_transaction_payload(account_id, category_id)
-    )
+    auth_client.post("/api/transactions", json=make_transaction_payload(account_id, category_id))
 
     response = auth_client.delete(f"/api/categories/{category_id}")
     assert response.status_code == 409
@@ -178,9 +190,7 @@ def test_账户有流水时删除返回409(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    auth_client.post(
-        "/api/transactions", json=make_transaction_payload(account_id, category_id)
-    )
+    auth_client.post("/api/transactions", json=make_transaction_payload(account_id, category_id))
 
     response = auth_client.delete(f"/api/accounts/{account_id}")
     assert response.status_code == 409
@@ -196,33 +206,39 @@ def test_用户之间不能互相访问流水(auth_client):
     assert created.status_code == 200, created.text
     tid = created.json()["id"]
 
-
     with TestClient(app) as other:
-        assert other.post("/api/auth/register", json={
-            "email": "other@example.com",
-            "password": "password123",
-            "nickname": "另一个人",
-        }).status_code == 200
+        assert (
+            other.post(
+                "/api/auth/register",
+                json={
+                    "email": "other@example.com",
+                    "password": "password123",
+                    "nickname": "另一个人",
+                },
+            ).status_code
+            == 200
+        )
 
-        assert other.post("/api/auth/login", json={
-            "email": "other@example.com",
-            "password": "password123",
-        }).status_code == 200
-
+        assert (
+            other.post(
+                "/api/auth/login",
+                json={
+                    "email": "other@example.com",
+                    "password": "password123",
+                },
+            ).status_code
+            == 200
+        )
 
         other_account_id = create_account(other, name="B的现金")
         other_category_id = create_category(other, name="B的餐饮")
 
         response = other.put(
             f"/api/transactions/{tid}",
-            json=make_transaction_payload(
-                other_account_id, other_category_id, money="999.00"
-            ),
+            json=make_transaction_payload(other_account_id, other_category_id, money="999.00"),
         )
 
-
         assert response.status_code == 404
-
 
     listed = auth_client.get("/api/transactions").json()
     assert len(listed) == 1

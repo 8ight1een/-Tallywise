@@ -1,31 +1,26 @@
-from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from model import Account, Category, Transaction
 from schemas import AccountCreate, CategoryCreate, TransactionCreate
+from services.db_errors import is_constraint_violation
 from services.errors import (
     BusinessConflictError,
-    ResourceNotFoundError,
     MoneyTypeMismatchError,
+    ResourceNotFoundError,
 )
-from services.db_errors import is_constraint_violation
 
 
 async def get_transactions_service(db: AsyncSession, user_id: int):
-    result = await db.execute(
-        select(Transaction).where(Transaction.user_id == user_id)
-    )
+    result = await db.execute(select(Transaction).where(Transaction.user_id == user_id))
     return result.scalars().all()
 
 
 async def get_accounts_service(db: AsyncSession, user_id: int):
-    result = await db.execute(
-        select(Account).where(Account.user_id == user_id)
-    )
+    result = await db.execute(select(Account).where(Account.user_id == user_id))
     return result.scalars().all()
 
 
@@ -43,7 +38,23 @@ async def get_categories_service(
     return result.scalars().all()
 
 
-async def owned_resource(db, model, resource_id, user_id):
+async def get_owned(db, model, resource_id, user_id):
+    result = await db.execute(
+        select(model).where(
+            model.id == resource_id,
+            model.user_id == user_id,
+        )
+    )
+
+    resource = result.scalar_one_or_none()
+
+    if resource is None:
+        raise ResourceNotFoundError("账户或分类不存在")
+
+    return resource
+
+
+async def lock_owned(db, model, resource_id, user_id):
     result = await db.execute(
         select(model)
         .where(
@@ -60,35 +71,20 @@ async def owned_resource(db, model, resource_id, user_id):
 
     return resource
 
-async def validate_references(db, data, user_id):
-    await owned_resource(
-        db, Account, data.account_id, user_id
-    )
 
-    category = await owned_resource(
-        db, Category, data.category_id, user_id
-    )
+async def validate_references(db, data, user_id):
+    await get_owned(db, Account, data.account_id, user_id)
+
+    category = await get_owned(db, Category, data.category_id, user_id)
 
     if category.money_type != data.money_type:
-        raise MoneyTypeMismatchError(
-            "分类与流水的收支类型不一致"
-        )
+        raise MoneyTypeMismatchError("分类与流水的收支类型不一致")
 
 
 def is_category_name_conflict(exc: IntegrityError) -> bool:
-    # 约束名称对应 database/schema_pg.sql 的 PostgreSQL 默认命名。
-    return is_constraint_violation(
-        exc, "23505", "categories_user_id_name_categories_key"
-    )
+    return is_constraint_violation(exc, "23505", "categories_user_id_name_categories_key")
 
 
-# PostgreSQL 里"父行被引用所以删不掉"有两种 SQLSTATE，取决于外键怎么写的：
-#
-#   23001  restrict_violation      <- ON DELETE RESTRICT 触发（schema_pg.sql 用的就是这个）
-#   23503  foreign_key_violation   <- ON DELETE NO ACTION 触发（PostgreSQL 默认行为）
-#
-# 曾经这里只检查 23503，导致"分类/账户已有流水时删除"返回 500 而不是 409。
-# 两个都接受，这样将来改外键定义也不会漏。
 FK_IN_USE_SQLSTATES = ("23001", "23503")
 
 
@@ -111,74 +107,50 @@ async def create_transaction_service(
     data: TransactionCreate,
     user_id: int,
 ) -> Transaction:
-    try:
-        await validate_references(db, data, user_id)
+    await validate_references(db, data, user_id)
 
-        transaction = Transaction(
-            **data.model_dump(),
-            user_id=user_id,
-            created_at=datetime.now(),
-        )
+    transaction = Transaction(
+        **data.model_dump(),
+        user_id=user_id,
+    )
 
-        db.add(transaction)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+    db.add(transaction)
+    await db.flush()
     return transaction
+
 
 async def update_transaction_service(
-    db: AsyncSession,
-    data: TransactionCreate,
-    transaction_id:int,
-    user_id:int
-)-> Transaction:
-    try:
-        result = await db.execute(
-            select(Transaction).where(
-                Transaction.id == transaction_id,
-                Transaction.user_id == user_id
-            )
-        )
-        transaction = result.scalar_one_or_none()
+    db: AsyncSession, data: TransactionCreate, transaction_id: int, user_id: int
+) -> Transaction:
+    result = await db.execute(
+        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+    )
+    transaction = result.scalar_one_or_none()
 
-        if transaction is None:
-            raise ResourceNotFoundError("Transaction not found")
+    if transaction is None:
+        raise ResourceNotFoundError("Transaction not found")
 
-
-        await validate_references(db, data, user_id)
-        transaction.account_id = data.account_id
-        transaction.category_id = data.category_id
-        transaction.money = data.money
-        transaction.money_type = data.money_type
-        transaction.description = data.description
-        transaction.transaction_date = data.transaction_date
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+    await validate_references(db, data, user_id)
+    transaction.account_id = data.account_id
+    transaction.category_id = data.category_id
+    transaction.money = data.money
+    transaction.money_type = data.money_type
+    transaction.description = data.description
+    transaction.transaction_date = data.transaction_date
+    await db.flush()
     return transaction
 
-async def delete_transaction_service(
-     db: AsyncSession,
-     transaction_id: int,
-     user_id:int
-)-> None:
-    try:
-        result = await db.execute(
-            select(Transaction).where(
-                Transaction.id == transaction_id,
-                Transaction.user_id == user_id
-            )
-        )
-        transaction = result.scalar_one_or_none()
-        if transaction is None:
-            raise ResourceNotFoundError("Transaction not found")
-        await db.delete(transaction)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+
+async def delete_transaction_service(db: AsyncSession, transaction_id: int, user_id: int) -> None:
+    result = await db.execute(
+        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+    )
+    transaction = result.scalar_one_or_none()
+    if transaction is None:
+        raise ResourceNotFoundError("Transaction not found")
+    await db.delete(transaction)
+    await db.flush()
+
 
 async def update_category_service(
     db: AsyncSession,
@@ -186,87 +158,55 @@ async def update_category_service(
     category_id: int,
     user_id: int,
 ) -> Category:
+    category = await lock_owned(db, Category, category_id, user_id)
+    if category.money_type != data.money_type:
+        existing = await db.execute(
+            select(Transaction.id).where(Transaction.category_id == category_id).limit(1)
+        )
+        if existing.first() is not None:
+            raise BusinessConflictError("分类已有流水，不能修改收支类型")
+    category.name_categories = data.name_categories
+    category.money_type = data.money_type
     try:
-        category = await owned_resource(db, Category, category_id, user_id)
-        if category.money_type != data.money_type:
-            existing = await db.execute(
-                select(Transaction.id)
-                .where(Transaction.category_id == category_id)
-                .limit(1)
-                .with_for_update()
-            )
-            if existing.first() is not None:
-                raise BusinessConflictError("分类已有流水，不能修改收支类型")
-        category.name_categories = data.name_categories
-        category.money_type = data.money_type
-        await db.commit()
+        await db.flush()
     except IntegrityError as exc:
-        await db.rollback()
-
         if is_category_name_conflict(exc):
-            raise BusinessConflictError(
-                "该分类名称已存在"
-            ) from exc
-
+            raise BusinessConflictError("该分类名称已存在") from exc
         raise
-
-    except Exception:
-        await db.rollback()
-        raise
-
     return category
+
 
 async def create_category_service(
     db: AsyncSession,
     data: CategoryCreate,
     user_id: int,
 ) -> Category:
+    category = Category(
+        user_id=user_id, name_categories=data.name_categories, money_type=data.money_type
+    )
+
+    db.add(category)
     try:
-        category = Category(
-            user_id=user_id,
-            name_categories=data.name_categories,
-            money_type=data.money_type
-        )
-
-        db.add(category)
-        await db.commit()
-        await db.refresh(category)
+        await db.flush()
     except IntegrityError as exc:
-        await db.rollback()
-
         if is_category_name_conflict(exc):
-            raise BusinessConflictError(
-                "该分类名称已存在"
-            ) from exc
-
+            raise BusinessConflictError("该分类名称已存在") from exc
         raise
-
-    except Exception:
-        await db.rollback()
-        raise
-
     return category
+
 
 async def delete_category_service(
     db: AsyncSession,
     user_id: int,
     category_id: int,
 ) -> None:
+    category = await lock_owned(db, Category, category_id, user_id)
+    await db.delete(category)
     try:
-        category = await owned_resource(db, Category, category_id, user_id)
-        await db.delete(category)
-        await db.commit()
+        await db.flush()
     except IntegrityError as exc:
-        await db.rollback()
-
         if is_category_in_use(exc):
-            raise BusinessConflictError(
-                "分类已有流水，不能删除"
-            ) from exc
-
-        raise
-    except Exception:
-        await db.rollback()
+            raise BusinessConflictError("分类已有流水，不能删除") from exc
         raise
 
 
@@ -275,18 +215,12 @@ async def create_account_service(
     data: AccountCreate,
     user_id: int,
 ) -> Account:
-    try:
-        account = Account(
-            user_id=user_id,
-            name_accounts=data.name_accounts,
-        )
-        db.add(account)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-
-    await db.refresh(account)
+    account = Account(
+        user_id=user_id,
+        name_accounts=data.name_accounts,
+    )
+    db.add(account)
+    await db.flush()
     return account
 
 
@@ -296,23 +230,18 @@ async def update_account_service(
     account_id: int,
     user_id: int,
 ) -> Account:
-    try:
-        result = await db.execute(
-            select(Account).where(
-                Account.id == account_id,
-                Account.user_id == user_id,
-            )
+    result = await db.execute(
+        select(Account).where(
+            Account.id == account_id,
+            Account.user_id == user_id,
         )
-        account = result.scalar_one_or_none()
-        if account is None:
-            raise ResourceNotFoundError("Account not found")
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise ResourceNotFoundError("Account not found")
 
-        account.name_accounts = data.name_accounts
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-
+    account.name_accounts = data.name_accounts
+    await db.flush()
     return account
 
 
@@ -321,15 +250,11 @@ async def delete_account_service(
     account_id: int,
     user_id: int,
 ) -> None:
+    account = await lock_owned(db, Account, account_id, user_id)
+    await db.delete(account)
     try:
-        account = await owned_resource(db, Account, account_id, user_id)
-        await db.delete(account)
-        await db.commit()
+        await db.flush()
     except IntegrityError as exc:
-        await db.rollback()
         if is_account_in_use(exc):
             raise BusinessConflictError("账户已有流水，不能删除") from exc
-        raise
-    except Exception:
-        await db.rollback()
         raise

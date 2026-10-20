@@ -3,7 +3,7 @@ CREATE TABLE users (
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(250) NOT NULL,
     nickname VARCHAR(100),
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE accounts (
@@ -11,7 +11,7 @@ CREATE TABLE accounts (
     user_id INT NOT NULL
         REFERENCES users(id) ON DELETE RESTRICT,
     name_accounts VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE categories (
@@ -21,7 +21,7 @@ CREATE TABLE categories (
     name_categories VARCHAR(100) NOT NULL,
     money_type VARCHAR(10) NOT NULL
         CHECK (money_type IN ('收入', '支出')),
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     UNIQUE (user_id, name_categories)
 );
@@ -41,7 +41,7 @@ CREATE TABLE transactions (
 
     description VARCHAR(250),
     transaction_date DATE NOT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_accounts_user

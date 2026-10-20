@@ -1,7 +1,7 @@
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -34,7 +34,9 @@ def test_可选配置使用默认值(required_config):
     assert settings.sql_echo is False
 
 
-@pytest.mark.parametrize("value,expected", [("true", True), ("false", False), ("1", True), ("0", False)])
+@pytest.mark.parametrize(
+    "value,expected", [("true", True), ("false", False), ("1", True), ("0", False)]
+)
 def test_布尔环境变量正确转换(required_config, monkeypatch, value, expected):
     monkeypatch.setenv("COOKIE_SECURE", value)
     monkeypatch.setenv("SQL_ECHO", value)
@@ -65,7 +67,10 @@ def test_无效端口在加载配置时拒绝(required_config, monkeypatch, port
     assert "database_port" in {item["loc"][0] for item in error.value.errors()}
 
 
-@pytest.mark.parametrize("field", ["secret_key", "database_host", "database_username", "database_password", "database_name"])
+@pytest.mark.parametrize(
+    "field",
+    ["secret_key", "database_host", "database_username", "database_password", "database_name"],
+)
 def test_缺少必填配置时拒绝启动(required_config, field):
     required_config.pop(field)
     with pytest.raises(ValidationError) as error:
@@ -111,17 +116,27 @@ def test_从其他目录启动时各模块使用同一配置(required_config, tm
     environment.update({key.upper(): value for key, value in required_config.items()})
     environment.update(DATABASE_PORT="6543", COOKIE_SECURE="true", SQL_ECHO="true")
     backend = str(Path(__file__).resolve().parents[1])
-    code = "\n".join([
-        "import sys",
-        f"sys.path.insert(0, {backend!r})",
-        "import config, main, database, auth",
-        "from routers import users",
-        "assert database.settings is config.settings is users.settings",
-        "assert database.DATABASE_URL.port == 6543",
-        "assert database.engine.echo is True",
-        "assert users.settings.cookie_secure is True",
-        "assert auth.SECRET_KEY == config.settings.secret_key",
-        "assert database.DATABASE_URL.database == 'config_test'",
-    ])
-    result = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15)
+    code = "\n".join(
+        [
+            "import sys",
+            f"sys.path.insert(0, {backend!r})",
+            "import config, main, database, auth",
+            "from routers import users",
+            "assert database.settings is config.settings is users.settings",
+            "assert database.DATABASE_URL.port == 6543",
+            "assert database.engine.echo is True",
+            "assert users.settings.cookie_secure is True",
+            "assert auth.SECRET_KEY == config.settings.secret_key",
+            "assert database.DATABASE_URL.database == 'config_test'",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
     assert result.returncode == 0, result.stderr

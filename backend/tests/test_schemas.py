@@ -51,20 +51,26 @@ def test_合法交易可以构造出来():
     assert created.description is None
 
 
-@pytest.mark.parametrize("money,reason", [
-    (Decimal("0"), "零"),
-    (Decimal("-1"), "负数"),
-    (Decimal("-0.01"), "负的小数"),
-])
+@pytest.mark.parametrize(
+    "money,reason",
+    [
+        (Decimal(0), "零"),
+        (Decimal(-1), "负数"),
+        (Decimal("-0.01"), "负的小数"),
+    ],
+)
 def test_金额必须大于零(money, reason):
     with pytest.raises(ValidationError):
         TransactionCreate(**make_transaction(money=money))
 
 
-@pytest.mark.parametrize("money,reason", [
-    (Decimal("0.001"), "三位小数"),
-    (Decimal("1.234"), "多余精度"),
-])
+@pytest.mark.parametrize(
+    "money,reason",
+    [
+        (Decimal("0.001"), "三位小数"),
+        (Decimal("1.234"), "多余精度"),
+    ],
+)
 def test_金额最多两位小数(money, reason):
     with pytest.raises(ValidationError):
         TransactionCreate(**make_transaction(money=money))
@@ -76,11 +82,14 @@ def test_金额超过最大位数被拒绝():
         TransactionCreate(**make_transaction(money=Decimal("10000000.00")))
 
 
-@pytest.mark.parametrize("money,reason", [
-    (Decimal("0.01"), "最小合法值"),
-    (Decimal("10.00"), "普通值"),
-    (Decimal("9999999.99"), "最大合法值"),
-])
+@pytest.mark.parametrize(
+    "money,reason",
+    [
+        (Decimal("0.01"), "最小合法值"),
+        (Decimal("10.00"), "普通值"),
+        (Decimal("9999999.99"), "最大合法值"),
+    ],
+)
 def test_合法金额被接受(money, reason):
     assert TransactionCreate(**make_transaction(money=money)).money == money
 
@@ -148,10 +157,13 @@ def test_分类的收支类型必须合法(valid_category_data):
         CategoryCreate(**{**valid_category_data, "money_type": "转账"})
 
 
-@pytest.mark.parametrize("password,reason", [
-    ("1234567", "只有7位"),
-    ("a" * 33, "超过32位"),
-])
+@pytest.mark.parametrize(
+    "password,reason",
+    [
+        ("1234567", "只有7位"),
+        ("a" * 33, "超过32位"),
+    ],
+)
 def test_密码长度必须在8到32之间(valid_user_data, password, reason):
     with pytest.raises(ValidationError):
         UserCreate(**{**valid_user_data, "password": password})

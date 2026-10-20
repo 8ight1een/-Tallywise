@@ -49,7 +49,7 @@ class Transaction(Base):
     description: Mapped[str | None] = mapped_column(String(250))
     transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
@@ -61,7 +61,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(250), nullable=False)
     nickname: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
@@ -75,7 +75,7 @@ class Account(Base):
     )
     name_accounts: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
@@ -96,5 +96,5 @@ class Category(Base):
     name_categories: Mapped[str] = mapped_column(String(100), nullable=False)
     money_type: Mapped[str] = mapped_column(String(10), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

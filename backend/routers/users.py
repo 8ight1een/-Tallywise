@@ -1,5 +1,3 @@
-from config import settings
-
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,17 +6,19 @@ from auth import (
     create_access_token,
     get_current_user,
 )
+from config import settings
 from database import get_session
 from model import User
-from schemas import UserCreate, UserLogin, UserOut, LoginOut, MessageOut
-from services.users import register_user_service, login_user_service
+from schemas import LoginOut, MessageOut, UserCreate, UserLogin, UserOut
+from services.users import login_user_service, register_user_service
 
 router = APIRouter(prefix="/api", tags=["用户"])
 
+
 @router.post("/auth/register", response_model=UserOut)
 async def register(
-        data:UserCreate,
-        db: AsyncSession = Depends(get_session),
+    data: UserCreate,
+    db: AsyncSession = Depends(get_session),
 ):
     new_user = await register_user_service(
         db=db,
@@ -61,13 +61,13 @@ async def login(
         },
     }
 
+
 @router.post("/auth/logout", response_model=MessageOut)
 async def logout(response: Response):
     response.delete_cookie("access_token")
 
-    return {
-        "message": "已退出登录"
-    }
+    return {"message": "已退出登录"}
+
 
 @router.get("/auth/me", response_model=UserOut)
 async def get_me(

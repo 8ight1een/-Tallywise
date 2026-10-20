@@ -14,14 +14,18 @@ from services.reports import (
 )
 
 
-@pytest.mark.parametrize("year,month,expected", [
-    (2025, 1,  (date(2025, 1, 1),  date(2025, 2, 1))),
-    (2025, 2,  (date(2025, 2, 1),  date(2025, 3, 1))),
-    (2024, 2,  (date(2024, 2, 1),  date(2024, 3, 1))),
-    (2025, 3,  (date(2025, 3, 1),  date(2025, 4, 1))),
-    (2025, 11, (date(2025, 11, 1), date(2025, 12, 1))),
-    (2025, 12, (date(2025, 12, 1), date(2026, 1, 1))),
-], ids=["1月", "平年2月", "闰年2月", "3月", "11月", "12月跨年"])
+@pytest.mark.parametrize(
+    "year,month,expected",
+    [
+        (2025, 1, (date(2025, 1, 1), date(2025, 2, 1))),
+        (2025, 2, (date(2025, 2, 1), date(2025, 3, 1))),
+        (2024, 2, (date(2024, 2, 1), date(2024, 3, 1))),
+        (2025, 3, (date(2025, 3, 1), date(2025, 4, 1))),
+        (2025, 11, (date(2025, 11, 1), date(2025, 12, 1))),
+        (2025, 12, (date(2025, 12, 1), date(2026, 1, 1))),
+    ],
+    ids=["1月", "平年2月", "闰年2月", "3月", "11月", "12月跨年"],
+)
 def test_月份区间是左闭右开(year, month, expected):
     assert month_range(year, month) == expected
 
@@ -103,10 +107,12 @@ async def test_收入和支出分开统计(db, owner, account, category):
     income_category = Category(user_id=owner.id, name_categories="工资", money_type="收入")
     db.add(income_category)
     await db.commit()
-    await add_transaction(db, owner, account, income_category,
-                          day=date(2025, 3, 1), money="100.00", money_type="收入")
-    await add_transaction(db, owner, account, category,
-                          day=date(2025, 3, 2), money="30.00", money_type="支出")
+    await add_transaction(
+        db, owner, account, income_category, day=date(2025, 3, 1), money="100.00", money_type="收入"
+    )
+    await add_transaction(
+        db, owner, account, category, day=date(2025, 3, 2), money="30.00", money_type="支出"
+    )
 
     result = await get_summary_service(db=db, user_id=owner.id, year=2025, month=3)
 
@@ -140,8 +146,9 @@ async def test_不会统计到别人的流水(db, owner, account, category):
     db.add_all([stranger_account, stranger_category])
     await db.commit()
 
-    await add_transaction(db, stranger, stranger_account, stranger_category,
-                          day=date(2025, 3, 1), money="999.00")
+    await add_transaction(
+        db, stranger, stranger_account, stranger_category, day=date(2025, 3, 1), money="999.00"
+    )
 
     result = await get_summary_service(db=db, user_id=owner.id, year=2025, month=3)
 
@@ -168,32 +175,30 @@ async def test_不传年月时使用数据库月份(db, owner, account, category
             return date(2000 if today.year != 2000 else 2001, 1, 1)
 
     monkeypatch.setattr(reports, "date", DifferentLocalDate)
-    await add_transaction(db, owner, account, category,
-                          day=today.replace(day=1), money="10.00")
-    await add_transaction(db, owner, account, category,
-                          day=DifferentLocalDate.today(), money="999.00")
+    await add_transaction(db, owner, account, category, day=today.replace(day=1), money="10.00")
+    await add_transaction(
+        db, owner, account, category, day=DifferentLocalDate.today(), money="999.00"
+    )
 
     result = await get_summary_service(db=db, user_id=owner.id)
 
     assert result["money_out"] == Decimal("10.00")
 
 
-@pytest.mark.parametrize("kwargs", [{"year": 2025}, {"month": 3}],
-                         ids=["只给year", "只给month"])
+@pytest.mark.parametrize("kwargs", [{"year": 2025}, {"month": 3}], ids=["只给year", "只给month"])
 async def test_年月必须成对提供(db, owner, kwargs):
     with pytest.raises(ValueError):
         await get_summary_service(db=db, user_id=owner.id, **kwargs)
 
 
 async def test_月度流水只返回该月记录(db, owner, account, category):
-    march = await add_transaction(db, owner, account, category,
-                                  day=date(2025, 3, 15), money="10.00")
+    march = await add_transaction(
+        db, owner, account, category, day=date(2025, 3, 15), money="10.00"
+    )
     await add_transaction(db, owner, account, category, day=date(2025, 4, 1), money="20.00")
     await add_transaction(db, owner, account, category, day=date(2025, 2, 28), money="30.00")
 
-    rows = await get_transactions_by_month_service(
-        db=db, user_id=owner.id, year=2025, month=3
-    )
+    rows = await get_transactions_by_month_service(db=db, user_id=owner.id, year=2025, month=3)
 
     assert [row.id for row in rows] == [march.id]
 
@@ -201,9 +206,7 @@ async def test_月度流水只返回该月记录(db, owner, account, category):
 async def test_月度流水包含月末最后一天(db, owner, account, category):
     await add_transaction(db, owner, account, category, day=date(2025, 3, 31), money="10.00")
 
-    rows = await get_transactions_by_month_service(
-        db=db, user_id=owner.id, year=2025, month=3
-    )
+    rows = await get_transactions_by_month_service(db=db, user_id=owner.id, year=2025, month=3)
 
     assert len(rows) == 1
 
@@ -213,9 +216,7 @@ async def test_月度流水按日期倒序(db, owner, account, category):
     await add_transaction(db, owner, account, category, day=date(2025, 3, 20), money="20.00")
     await add_transaction(db, owner, account, category, day=date(2025, 3, 10), money="30.00")
 
-    rows = await get_transactions_by_month_service(
-        db=db, user_id=owner.id, year=2025, month=3
-    )
+    rows = await get_transactions_by_month_service(db=db, user_id=owner.id, year=2025, month=3)
 
     assert [row.transaction_date for row in rows] == [
         date(2025, 3, 20),
@@ -226,7 +227,9 @@ async def test_月度流水按日期倒序(db, owner, account, category):
 
 async def test_同一天按编号倒序(db, owner, account, category):
     first = await add_transaction(db, owner, account, category, day=date(2025, 3, 1), money="10.00")
-    second = await add_transaction(db, owner, account, category, day=date(2025, 3, 1), money="20.00")
+    second = await add_transaction(
+        db, owner, account, category, day=date(2025, 3, 1), money="20.00"
+    )
     rows = await get_transactions_by_month_service(db=db, user_id=owner.id, year=2025, month=3)
     assert [row.id for row in rows] == [second.id, first.id]
 
