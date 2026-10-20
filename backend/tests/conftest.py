@@ -1,12 +1,13 @@
 import asyncio
 import os
+import subprocess
+import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
 
 TEST_DB_NAME = os.getenv("TEST_DATABASE_NAME", "tallywise_test")
@@ -38,8 +39,6 @@ from sqlalchemy.pool import NullPool
 from database import DATABASE_URL, get_session
 from main import app
 
-SCHEMA_SQL_PATH = PROJECT_ROOT / "database" / "schema_pg.sql"
-
 TABLES = ["transactions", "categories", "accounts", "users"]
 
 engine = create_async_engine(DATABASE_URL, poolclass=NullPool, echo=False)
@@ -48,15 +47,10 @@ TestSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=Asy
 
 
 async def _reset_schema() -> None:
-
-    schema_sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
-
     async with engine.begin() as conn:
-        await conn.execute(text(f"DROP TABLE IF EXISTS {', '.join(TABLES)} CASCADE"))
-
-        for statement in schema_sql.split(";"):
-            if statement.strip():
-                await conn.execute(text(statement))
+        await conn.execute(
+            text(f"DROP TABLE IF EXISTS {', '.join(TABLES)}, alembic_version CASCADE")
+        )
 
 
 async def _truncate_all() -> None:
@@ -71,8 +65,27 @@ def prepare_database():
     if TEST_DB_NAME == ORIGINAL_DB_NAME or DATABASE_URL.database != TEST_DB_NAME:
         raise RuntimeError("拒绝清库：测试库不能与原数据库相同，连接目标也必须匹配测试库名。")
     asyncio.run(_reset_schema())
-    yield
-    asyncio.run(engine.dispose())
+    environment = os.environ.copy()
+    environment["DATABASE_NAME"] = TEST_DB_NAME
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                str(BACKEND_DIR / "alembic.ini"),
+                "upgrade",
+                "head",
+            ],
+            cwd=BACKEND_DIR,
+            env=environment,
+            check=True,
+            timeout=120,
+        )
+        yield
+    finally:
+        asyncio.run(engine.dispose())
 
 
 @pytest.fixture

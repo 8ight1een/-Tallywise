@@ -147,7 +147,7 @@ Copy-Item .env.example .env
 | `backend` | Ruff 检查与格式校验、mypy、Alembic 升级与结构一致性检查、pytest；使用 PostgreSQL 18 服务 |
 | `frontend` | ESLint / Oxlint 检查、TypeScript 类型检查与 Vite 构建 |
 
-后端测试覆盖输入校验、注册登录、用户数据隔离、账户与分类约束、流水增删改、月份边界、闰年、空汇总，以及配置和离线迁移。数据库测试使用真实 PostgreSQL；常规测试夹具根据手写 SQL 重建业务表，CI 另设 Alembic 检查步骤。
+后端测试覆盖输入校验、注册登录、用户数据隔离、账户与分类约束、流水增删改、月份边界、闰年、空汇总，以及配置和离线迁移。数据库测试使用真实 PostgreSQL：每次 pytest 运行在首次使用数据库夹具时，清理专用测试库中的业务表与迁移版本记录，再执行 `alembic upgrade head` 建表；每个测试前仅清空业务数据。测试直接使用迁移创建的表结构，CI 继续保留 Alembic 一致性检查。`schema_pg.sql` 作为结构参考，不再用于测试建表。
 
 <details>
 <summary>在本地运行检查</summary>
