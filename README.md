@@ -715,3 +715,27 @@ $env:TEST_DATABASE_NAME = "tallywise_test"
 ```powershell
 .\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "说明本次结构变更"
 ```
+
+### 26. 统一事务和时间处理，补充日志、CI 与 Docker 配置
+
+这一步集中整理后端运行和开发流程：把事务管理放到会话依赖中，统一创建时间的来源，增加请求日志、数据库健康检查，以及自动检查和容器启动配置。
+
+1. `database.py` 的 `get_session()` 使用 `session.begin()` 管理请求事务。用户、账户、分类和流水服务中的写操作改为 `flush()`，由外层事务负责提交或回滚，减少各服务重复管理事务的代码。直接调用服务的测试同步调整提交和回滚的位置。
+
+2. 四张表的 `created_at` 在 ORM 中统一声明为 `DateTime(timezone=True)`，手写建表 SQL 同步改为 `TIMESTAMPTZ`。新增迁移 `4481c809aaef`，接在 `b27f4e9a6c10` 后面修改这些字段；创建流水时移除后端的 `datetime.now()`，使用数据库已有的 `now()` 默认值。记账日期 `transaction_date` 仍保留日期类型。
+
+3. 拆分资源查询辅助函数：`get_owned()` 用于按用户查询账户或分类，`lock_owned()` 用于需要锁定记录的修改、删除操作。分类已有流水时仍禁止修改收支类型，账户和分类的删除冲突继续转换为业务异常。月度查询保留数据库日期作为默认月份来源，并补充取不到当前日期时的处理。
+
+4. 新增 `logging_config.py` 和 `middleware.py`。日志按 JSON 输出时间、级别、消息和请求编号；中间件读取或生成 `X-Request-ID`，记录请求方法、路径及状态码，并在响应中返回请求编号。未处理异常统一记录异常信息，返回带请求编号的 500 响应，方便对应日志查找问题；不存在账号的登录日志对邮箱作脱敏处理。
+
+5. `/api/health` 改为通过数据库会话执行 `SELECT 1`，连接查询失败时返回 503。这样健康检查包含数据库可用性，不再只是返回固定的成功消息。
+
+6. 开发依赖新增 Ruff 和 mypy，`backend/pyproject.toml` 集中配置代码检查、格式和类型检查规则；相关后端文件与测试同步整理导入、格式及类型写法。前端新增 `lint:ci` 命令，执行不带自动修复参数的代码检查。
+
+7. 新增 `.github/workflows/ci.yml`，在向 `main` 推送或创建、更新 PR 时运行检查。后端任务使用 Python 3.14 和 PostgreSQL 18，配置依赖安装、Ruff、mypy、Alembic 升级与一致性检查、pytest；前端任务使用 Node.js 24，配置依赖安装、代码检查和构建。
+
+8. 新增后端 `Dockerfile`、`.dockerignore` 和根目录 `compose.yaml`。Compose 配置 PostgreSQL 与后端两个服务，数据库使用持久化卷并设置 `Asia/Shanghai` 时区；后端等待数据库健康检查通过，再执行迁移和启动 Uvicorn。根目录 `.env.example` 提供数据库密码和签名密钥占位值，供 Compose 配置使用；后端本地开发配置仍由 `backend/.env` 读取。
+
+9. 新增 `scripts/setup-docker.ps1`，用于 Windows 下检查和启用 WSL、虚拟机平台功能，更新 WSL，并通过 winget 安装 Docker Desktop。脚本需要管理员权限，启用系统功能后提示先重启再继续。
+
+本次按新增和修改内容整理记录与提交，没有继续运行测试、CI 或 Docker 启动验证。新时间迁移没有显式指定历史时间的来源时区；用于其他已有数据的库时，需要先确认历史时间含义及迁移会话时区。
