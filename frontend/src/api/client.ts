@@ -1,37 +1,31 @@
-type RequestOptions = Omit<RequestInit,'body'>&{
-  json?:unknown
-  requiresAuth?:boolean
-  fallbackMessage?:string
+type RequestOptions = Omit<RequestInit, 'body'> & {
+  json?: unknown
+  requiresAuth?: boolean
+  fallbackMessage?: string
 }
 
-class ApiRequestError extends Error{
-  status:number
-  message:string
-
-  constructor(message:string,status:number){
+export class ApiRequestError extends Error {
+  constructor(message: string,public status: number,)
+  {
     super(message)
-    this.status = status
-    this.message = message
     this.name = 'ApiRequestError'
   }
 }
 
 let sessionVersion = 0
 let expired = false
-let unauthorizedHandler:(()=>void)| undefined
+let unauthorizedHandler: (() => void) | undefined
 
 export function resetApiSession() {
   sessionVersion++
   expired = false
 }
 
-export function onUnauthorized(handler:()=>void){
+export function onUnauthorized(handler: () => void) {
   unauthorizedHandler = handler
-  return ()=>{
-    if(unauthorizedHandler === handler){
-      unauthorizedHandler = undefined
-    }
-}
+  return () => {
+    if (unauthorizedHandler === handler) unauthorizedHandler = undefined
+  }
 }
 
 export function isUnauthorized(error: unknown) {
@@ -48,28 +42,28 @@ function detailMessage(data: unknown, fallback: string): string {
   if (typeof detail === 'string' && detail) {
     return detail
   }
+
   return fallback
 }
 
-
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { json, requiresAuth = true, fallbackMessage = '请求失败,请稍后重试',...init } = options
+export async function request<T = void>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { json, requiresAuth = true, fallbackMessage = '请求失败，请稍后重试。', ...init } = options
   const version = sessionVersion
-  const headers=new Headers(init.headers)
-  if(json !== undefined) headers.set('Content-Type','application/json')
+  const headers = new Headers(init.headers)
+  if (json !== undefined) headers.set('Content-Type', 'application/json')
   let response: Response
-  try{
+  try {
     response = await fetch(path, {
       ...init,
       headers,
-      credentials:'same-origin',
-      body: json=== undefined ? undefined : JSON.stringify(json)
+      credentials: 'same-origin',
+      body: json === undefined ? undefined : JSON.stringify(json),
     })
-  } catch{
-    throw new ApiRequestError("网络错误，请确认后端服务正在运行", 0)
+  } catch {
+    throw new ApiRequestError('网络错误，请确认后端服务正在运行。', 0)
   }
-  if(!response.ok){
-    if(version === sessionVersion && requiresAuth && response.status === 401&& !expired){
+  if (!response.ok) {
+    if (response.status === 401 && requiresAuth && version === sessionVersion && !expired) {
       expired = true
       unauthorizedHandler?.()
     }

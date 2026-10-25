@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { request, errorMessage } from '../api/client'
 import type { MoneyType, Account, Category, Transaction } from '../types'
 
 const props = defineProps<{
   isRefreshing: boolean
+  editingTransaction: Transaction | null
 }>()
 
 const emit = defineEmits<{
   created: []
+  updated: []
+  cancelEdit: []
+  busyChange: [busy: boolean]
 }>()
 
 const moneyType = ref<MoneyType>('支出')
@@ -28,6 +32,15 @@ const newCategoryName = ref('')
 const isCreatingAccount = ref(false)
 const isCreatingCategory = ref(false)
 const savedNotice = ref('')
+const isEditing = computed(() => props.editingTransaction !== null)
+const isWorking = computed(
+  () =>
+    isOptionsLoading.value ||
+    isSubmitting.value ||
+    isCreatingAccount.value ||
+    isCreatingCategory.value,
+)
+watch(isWorking, (busy) => emit('busyChange', busy), { immediate: true, flush: 'sync' })
 const isBusy = computed(
   () =>
     props.isRefreshing ||
@@ -38,15 +51,19 @@ const isBusy = computed(
 )
 
 const submitLabel = computed(() => {
-  if (isSubmitting.value) return '保存中…'
+  if (isSubmitting.value) return isEditing.value ? '更新中…' : '保存中…'
   if (isOptionsLoading.value) return '读取中…'
-  return '保存记录'
+  return isEditing.value ? '更新记录' : '保存记录'
 })
 
 async function loadAccounts() {
   accounts.value = await request<Account[]>('/api/accounts')
 
-  accountId.value = accounts.value[0]?.id ?? null
+  const preferred = props.editingTransaction?.account_id
+  accountId.value =
+    preferred === undefined
+      ? (accounts.value[0]?.id ?? null)
+      : (accounts.value.find((account) => account.id === preferred)?.id ?? null)
 }
 
 async function loadCategories() {
@@ -56,7 +73,14 @@ async function loadCategories() {
   const query = encodeURIComponent(moneyType.value)
   categories.value = await request<Category[]>(`/api/categories?money_type=${query}`)
 
-  categoryId.value = categories.value[0]?.id ?? null
+  const preferred =
+    props.editingTransaction?.money_type === moneyType.value
+      ? props.editingTransaction.category_id
+      : undefined
+  categoryId.value =
+    preferred === undefined
+      ? (categories.value[0]?.id ?? null)
+      : (categories.value.find((category) => category.id === preferred)?.id ?? null)
 }
 
 async function loadOptions() {
@@ -177,8 +201,10 @@ async function handleSubmit() {
   isSubmitting.value = true
 
   try {
-    await request<Transaction>('/api/transactions', {
-      method: 'POST',
+    const editingId = props.editingTransaction?.id
+    const url = editingId === undefined ? '/api/transactions' : `/api/transactions/${editingId}`
+    await request<Transaction>(url, {
+      method: editingId === undefined ? 'POST' : 'PUT',
       fallbackMessage: '保存记录失败。',
       json: {
         account_id: accountId.value,
@@ -193,7 +219,8 @@ async function handleSubmit() {
     resetForm()
 
     savedNotice.value = '保存成功。列表仍显示所选月份，其他月份的记录请切换月份查看。'
-    emit('created')
+    if (editingId === undefined) emit('created')
+    else emit('updated')
   } catch (error) {
     console.error(error)
     submitError.value = errorMessage(error, '保存记录失败。')
@@ -203,13 +230,25 @@ async function handleSubmit() {
 }
 
 onMounted(() => {
+  const transaction = props.editingTransaction
+  if (transaction) {
+    moneyType.value = transaction.money_type
+    amount.value = Number(transaction.money)
+    description.value = transaction.description ?? ''
+    transactionDate.value = transaction.transaction_date
+  }
   loadOptions()
 })
+
+function cancelEditing() {
+  if (isBusy.value) return
+  emit('cancelEdit')
+}
 </script>
 
 <template>
   <aside class="panel form-panel">
-    <h2 class="panel-title">新增一笔记录</h2>
+    <h2 class="panel-title">{{ isEditing ? '编辑记录' : '新增一笔记录' }}</h2>
 
     <form @submit.prevent="handleSubmit">
       <fieldset class="form-grid" :disabled="isBusy">
@@ -273,7 +312,7 @@ onMounted(() => {
 
         <label>
           备注（可选）
-          <input v-model.trim="description" maxlength="30" placeholder="例如：周末咖啡" />
+          <input v-model.trim="description" maxlength="250" placeholder="例如：周末咖啡" />
         </label>
 
         <div class="two-col">
@@ -318,6 +357,9 @@ onMounted(() => {
         <div class="form-actions">
           <button class="submit" type="submit" :disabled="isOptionsLoading || isSubmitting">
             {{ submitLabel }}
+          </button>
+          <button v-if="isEditing" class="cancel-edit" type="button" @click="cancelEditing">
+            取消编辑
           </button>
         </div>
       </fieldset>
@@ -443,6 +485,14 @@ onMounted(() => {
   color: var(--sage);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.cancel-edit {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--muted);
 }
 
 .form-error {
