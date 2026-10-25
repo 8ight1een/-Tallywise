@@ -28,7 +28,7 @@ class Transaction(Base):
             "money_type IN ('收入', '支出')",
             name="transactions_money_type_check",
         ),
-        Index("idx_trans_user_date", "user_id", "transaction_date"),
+        Index("idx_trans_user_date_id", "user_id", "transaction_date", "id"),
         Index("idx_trans_account", "account_id"),
         Index("idx_trans_category", "category_id"),
     )
