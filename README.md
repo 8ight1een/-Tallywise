@@ -11,7 +11,8 @@
 | 模块 | 当前能力 |
 | --- | --- |
 | 用户与登录 | 邮箱注册、登录、恢复登录状态、退出登录；密码哈希存储，JWT 通过 HttpOnly Cookie 传递 |
-| 收支记录 | 页面支持新增流水、切换月份和筛选收入/支出；后端提供流水查询、修改与删除接口 |
+| 收支记录 | 页面支持新增、编辑、删除流水，切换月份和筛选收入/支出；后端提供流水查询、修改与删除接口 |
+| 流水分页 | 按月游标分页（`GET /api/transactions/page`），同一天多条记录不重复、不遗漏；返回 `next_cursor` 与 `has_more`，非法游标返回 422 |
 | 账户与分类 | 记账时选择或创建账户、收支分类；后端提供账户与分类的增删改查接口 |
 | 月度汇总 | 展示指定月份的收入、支出和收支结余，无记录时返回零 |
 | 用户数据隔离 | 后端根据登录用户限定查询与操作范围，校验流水关联的账户、分类归属 |
@@ -47,7 +48,8 @@ flowchart LR
 
 - **事务边界集中管理**：请求使用 `session.begin()` 管理提交与回滚，服务执行 `flush()` 写入数据库，便于在同一个事务内组合业务操作。[会话管理](backend/database.py) · [记账服务](backend/services/ledger.py)
 - **金额与业务约束分层校验**：金额使用 Python `Decimal` 和 PostgreSQL `NUMERIC(9, 2)`，以正数存储，由收支类型区分方向；Pydantic 校验输入，数据库通过 CHECK、唯一约束和外键约束兜底。金额响应按十进制字符串序列化。[数据模型](backend/model.py) · [接口模型](backend/schemas.py)
-- **按查询方式设计索引**：月度查询使用“用户 ID + 日期范围”，普通月份采用 `[本月第一天, 下月第一天)`，配合 `(user_id, transaction_date)` 联合索引，避免在日期列上提取年月后过滤。实际执行计划仍取决于数据量和统计信息。[报表查询](backend/services/reports.py)
+- **按查询方式设计索引**：月度查询使用“用户 ID + 日期范围”，普通月份采用 `[本月第一天, 下月第一天)`；分页按 `(transaction_date DESC, id DESC)` 排序，索引扩展为 `(user_id, transaction_date, id)`，等值、范围和排序一次满足，避免在日期列上提取年月后过滤。实际执行计划仍取决于数据量和统计信息。[报表查询](backend/services/reports.py)
+- **游标分页而不是 OFFSET**：用上一页最后一条的排序键做 keyset 条件，`(transaction_date, id) < (...)` 保证同一天多条不重复、不遗漏；游标编码成 URL 安全字符串交给客户端原样回传，多取一条判断 `has_more`，非法或空游标返回 422。代价是不支持跳页和总页数。[分页服务](backend/services/pagination.py)
 - **区分业务日期和创建时间**：`transaction_date` 使用 `DATE`；`created_at` 使用数据库生成的带时区时间。不传年月时，通过数据库 `CURRENT_DATE` 确定当前月份，避免后端机器时区影响默认月份。
 - **结构变更可追踪**：使用 Alembic 管理建表、Identity 主键对齐和时间字段迁移；CI 检查迁移后结构与 ORM 的一致性。历史 MySQL 脚本仅作为早期实现保留，当前使用 PostgreSQL。[迁移目录](backend/migrations/versions)
 - **请求可追踪**：JSON 日志包含请求编号，响应携带 `X-Request-ID`；未处理异常记录堆栈并返回通用错误信息。`/api/health` 执行数据库查询，数据库不可用时返回 503。[日志配置](backend/logging_config.py) · [请求中间件](backend/middleware.py)
@@ -58,7 +60,7 @@ flowchart LR
 backend/
 ├── main.py             # 应用入口、异常处理
 ├── routers/            # 用户与记账 HTTP 接口
-├── services/           # 用户、记账、报表业务
+├── services/           # 用户、记账、报表、分页业务
 ├── model.py            # ORM 模型、约束与索引
 ├── schemas.py          # 请求校验与响应模型
 ├── database.py         # 异步连接与事务管理
@@ -147,7 +149,7 @@ Copy-Item .env.example .env
 | `backend` | Ruff 检查与格式校验、mypy、Alembic 升级与结构一致性检查、pytest；使用 PostgreSQL 18 服务 |
 | `frontend` | ESLint / Oxlint 检查、TypeScript 类型检查与 Vite 构建 |
 
-后端测试覆盖输入校验、注册登录、用户数据隔离、账户与分类约束、流水增删改、月份边界、闰年、空汇总，以及配置和离线迁移。数据库测试使用真实 PostgreSQL：每次 pytest 运行在首次使用数据库夹具时，清理专用测试库中的业务表与迁移版本记录，再执行 `alembic upgrade head` 建表；每个测试前仅清空业务数据。测试直接使用迁移创建的表结构，CI 继续保留 Alembic 一致性检查。`schema_pg.sql` 作为结构参考，不再用于测试建表。
+后端测试覆盖输入校验、注册登录、用户数据隔离、账户与分类约束、流水增删改、流水分页（同日不漏、游标边界、用户隔离）、月份边界、闰年、空汇总，以及配置和离线迁移。数据库测试使用真实 PostgreSQL：每次 pytest 运行在首次使用数据库夹具时，清理专用测试库中的业务表与迁移版本记录，再执行 `alembic upgrade head` 建表；每个测试前仅清空业务数据。测试直接使用迁移创建的表结构，CI 继续保留 Alembic 一致性检查。`schema_pg.sql` 作为结构参考，不再用于测试建表。
 
 <details>
 <summary>在本地运行检查</summary>
@@ -180,7 +182,7 @@ npm run build
 
 ## 当前边界
 
-- 前端已提交版本提供新增与查询流程，流水编辑、删除的页面交互仍在完善；对应后端接口已实现。
-- 流水列表尚未分页，当前面向个人日常记账规模。
+- 前端已支持流水的编辑与删除；分页接口目前只在后端提供，页面仍一次加载整月流水。
+- 分页按月、按 `(日期, id)` 游标继续向后翻，不支持跳页和总页数；游标不绑定月份，跨月复用会得到空页或残缺一页。
 - 退出登录通过清除 Cookie 完成，已签发 JWT 没有即时撤销机制。
 - 容器配置用于本地运行；线上部署还需配置 HTTPS、反向代理、Secure Cookie 和数据库备份。
