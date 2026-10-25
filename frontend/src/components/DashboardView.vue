@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { request, errorMessage } from '../api/client'
+import { request, errorMessage, isUnauthorized } from '../api/client'
 import SummaryCards from './SummaryCards.vue'
 import TransactionList from './TransactionList.vue'
 import TransactionForm from './TransactionForm.vue'
@@ -26,6 +26,18 @@ const transactions = ref<Transaction[]>([])
 const categories = ref<Category[]>([])
 const isTransactionsLoading = ref(true)
 const transactionsError = ref('')
+const editingTransaction = ref<Transaction | null>(null)
+const deletingTransactionId = ref<number | null>(null)
+const isFormBusy = ref(true)
+const actionError = ref('')
+const actionNotice = ref('')
+const isActionBusy = computed(
+  () =>
+    isSummaryLoading.value ||
+    isTransactionsLoading.value ||
+    isFormBusy.value ||
+    deletingTransactionId.value !== null,
+)
 let summaryRequestVersion = 0
 let transactionsRequestVersion = 0
 
@@ -84,10 +96,52 @@ async function refreshFinancialData() {
 }
 
 async function changePeriod(value: MonthSelection) {
-  if (isSummaryLoading.value || isTransactionsLoading.value) return
+  if (isActionBusy.value || editingTransaction.value !== null) return
   if (value === selectedPeriod.value) return
   selectedPeriod.value = value
   await refreshFinancialData()
+}
+
+function startEditing(transaction: Transaction) {
+  if (isActionBusy.value || editingTransaction.value !== null) return
+  if (!window.confirm('进入编辑将清空当前新增表单的内容，是否继续？')) return
+  actionError.value = ''
+  actionNotice.value = ''
+  editingTransaction.value = { ...transaction }
+}
+
+function cancelEditing() {
+  if (isActionBusy.value) return
+  editingTransaction.value = null
+}
+
+async function handleTransactionSaved() {
+  const wasEditing = editingTransaction.value !== null
+  editingTransaction.value = null
+  actionError.value = ''
+  actionNotice.value = wasEditing ? '记录已更新。若更改了日期，请在对应月份查看。' : '记录已保存。'
+  await refreshFinancialData()
+}
+
+async function deleteTransaction(transaction: Transaction) {
+  if (isActionBusy.value || editingTransaction.value !== null) return
+  if (!window.confirm(`确定删除“${transaction.description || '这笔记录'}”吗？此操作无法撤销。`))
+    return
+  deletingTransactionId.value = transaction.id
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    await request(`/api/transactions/${transaction.id}`, {
+      method: 'DELETE',
+      fallbackMessage: '删除记录失败。',
+    })
+    actionNotice.value = '记录已删除。'
+    await refreshFinancialData()
+  } catch (error) {
+    if (!isUnauthorized(error)) actionError.value = errorMessage(error, '删除记录失败。')
+  } finally {
+    deletingTransactionId.value = null
+  }
 }
 
 onMounted(refreshFinancialData)
@@ -135,10 +189,17 @@ onMounted(refreshFinancialData)
       :period-label="periodLabel"
     />
 
+    <p v-if="actionError" class="auth-error" role="alert">{{ actionError }}</p>
+    <p v-if="actionNotice" role="status">{{ actionNotice }}</p>
     <section class="content">
       <TransactionForm
-        :is-refreshing="isSummaryLoading || isTransactionsLoading"
-        @created="refreshFinancialData"
+        :key="editingTransaction?.id ?? 'new'"
+        :editing-transaction="editingTransaction"
+        :is-refreshing="isSummaryLoading || isTransactionsLoading || deletingTransactionId !== null"
+        @busy-change="isFormBusy = $event"
+        @created="handleTransactionSaved"
+        @updated="handleTransactionSaved"
+        @cancel-edit="cancelEditing"
       />
       <TransactionList
         :transactions="transactions"
@@ -146,8 +207,12 @@ onMounted(refreshFinancialData)
         :is-loading="isTransactionsLoading"
         :error-message="transactionsError"
         :selected-period="selectedPeriod"
-        :is-period-loading="isSummaryLoading || isTransactionsLoading"
+        :is-period-loading="isActionBusy || editingTransaction !== null"
+        :is-action-disabled="isActionBusy || editingTransaction !== null"
+        :deleting-transaction-id="deletingTransactionId"
         @month-change="changePeriod"
+        @edit-request="startEditing"
+        @delete-request="deleteTransaction"
       />
     </section>
   </main>

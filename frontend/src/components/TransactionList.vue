@@ -10,10 +10,14 @@ const props = defineProps<{
   errorMessage: string
   isPeriodLoading: boolean
   selectedPeriod: MonthSelection
+  isActionDisabled: boolean
+  deletingTransactionId: number | null
 }>()
 
 const emit = defineEmits<{
   'month-change': [value: MonthSelection]
+  'edit-request': [transaction: Transaction]
+  'delete-request': [transaction: Transaction]
 }>()
 
 type RecordFilter = 'all' | 'expense' | 'income'
@@ -116,12 +120,48 @@ function formatMoney(value: number | string) {
           {{ transaction.money_type === '收入' ? '+' : '-' }}
           ¥{{ formatMoney(transaction.money) }}
         </div>
+        <div class="record-actions">
+          <button
+            type="button"
+            :disabled="isActionDisabled"
+            @click="emit('edit-request', transaction)"
+          >
+            编辑
+          </button>
+          <button
+            type="button"
+            :disabled="isActionDisabled"
+            @click="emit('delete-request', transaction)"
+          >
+            {{ deletingTransactionId === transaction.id ? '删除中…' : '删除' }}
+          </button>
+        </div>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
+.record-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.record-actions button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--muted);
+}
+
+.record-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 18px;
