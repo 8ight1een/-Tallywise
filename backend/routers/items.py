@@ -16,6 +16,7 @@ from schemas import (
     SummaryOut,
     TransactionCreate,
     TransactionOut,
+    TransactionPage,
 )
 from services.ledger import (
     create_account_service,
@@ -31,6 +32,7 @@ from services.ledger import (
     update_category_service,
     update_transaction_service,
 )
+from services.pagination import decode_cursor, list_transactions_page
 from services.reports import (
     get_summary_service,
     get_transactions_by_month_service,
@@ -218,6 +220,38 @@ async def get_summary(
         year=year,
         month=month,
     )
+
+
+@router.get("/transactions/page", response_model=TransactionPage)
+async def transactions_page(
+    year: int = Query(..., ge=1, le=9999),
+    month: int = Query(..., ge=1, le=12),
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if cursor is not None:
+        try:
+            decoded = decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="分页游标无效") from exc
+    else:
+        decoded = None
+
+    items, next_cursor, has_more = await list_transactions_page(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
+        limit=limit,
+        cursor=decoded,
+    )
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "has_more": has_more,
+    }
 
 
 @router.get("/transactions/{year}/{month}", response_model=list[TransactionOut])

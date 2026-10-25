@@ -51,6 +51,12 @@ class TransactionOut(OrmOut):
     created_at: datetime
 
 
+class TransactionPage(BaseModel):
+    items: list[TransactionOut]
+    next_cursor: str | None
+    has_more: bool
+
+
 class AccountOut(OrmOut):
     id: int
     name_accounts: str
