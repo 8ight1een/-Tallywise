@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,13 +21,14 @@ from schemas import (
 from services.ledger import (
     create_account_service,
     create_category_service,
-    create_transaction_service,
+    create_transaction_idempotent,
     delete_account_service,
     delete_category_service,
     delete_transaction_service,
     get_accounts_service,
     get_categories_service,
     get_transactions_service,
+    request_fingerprint,
     update_account_service,
     update_category_service,
     update_transaction_service,
@@ -86,14 +87,32 @@ async def get_categories(
 @router.post("/transactions", response_model=TransactionOut)
 async def add_transactions(
     data: TransactionCreate,
+    response: Response,
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=200,
+    ),
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return await create_transaction_service(
+    request_hash = request_fingerprint(data)
+    txn, created = await create_transaction_idempotent(
         db=db,
-        data=data,
         user_id=current_user.id,
+        idem_key=idempotency_key,
+        request_hash=request_hash,
+        data=data,
     )
+
+    await db.commit()
+
+    if created:
+        response.status_code = 201
+    else:
+        response.headers["Idempotent-Replayed"] = "true"
+
+    return txn
 
 
 @router.post("/accounts", response_model=AccountOut)
