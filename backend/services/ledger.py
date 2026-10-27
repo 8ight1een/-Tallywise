@@ -1,10 +1,13 @@
+import hashlib
+import json
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model import Account, Category, Transaction
+from model import Account, Category, IdempotencyKey, Transaction
 from schemas import AccountCreate, CategoryCreate, TransactionCreate
 from services.db_errors import is_constraint_violation
 from services.errors import (
@@ -258,3 +261,73 @@ async def delete_account_service(
         if is_account_in_use(exc):
             raise BusinessConflictError("账户已有流水，不能删除") from exc
         raise
+
+
+def request_fingerprint(data) -> str:
+    canonical = json.dumps(
+        data.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+async def claim_idempotency_key(db, user_id, idem_key, request_hash) -> bool:
+    stmt = (
+        insert(IdempotencyKey)
+        .values(
+            user_id=user_id,
+            idem_key=idem_key,
+            request_hash=request_hash,
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "idem_key"])
+        .returning(IdempotencyKey.user_id)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def get_idempotency_key(db, user_id, idem_key):
+    result = await db.execute(
+        select(IdempotencyKey).where(
+            IdempotencyKey.user_id == user_id,
+            IdempotencyKey.idem_key == idem_key,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_transaction_idempotent(
+    db,
+    user_id: int,
+    idem_key: str,
+    request_hash: str,
+    data,
+):
+    claimed = await claim_idempotency_key(db, user_id, idem_key, request_hash)
+    if not claimed:
+        row = await get_idempotency_key(db, user_id, idem_key)
+        if row is None:
+            raise BusinessConflictError("幂等键状态异常，请重试")
+        if row.request_hash != request_hash:
+            raise BusinessConflictError("同一个幂等键不能用于不同请求")
+        if row.transaction_id is None:
+            raise BusinessConflictError("请求正在处理中，请稍后重试")
+        txn = await db.get(Transaction, row.transaction_id)
+        if txn is None:
+            raise BusinessConflictError("原流水已不存在")
+        return txn, False
+
+    await validate_references(db, data, user_id)
+
+    txn = Transaction(**data.model_dump(), user_id=user_id)
+    db.add(txn)
+    await db.flush()
+
+    row = await get_idempotency_key(db, user_id, idem_key)
+    if row is None:
+        raise BusinessConflictError("幂等键状态异常，请重试")
+    row.transaction_id = txn.id
+    await db.flush()
+
+    return txn, True

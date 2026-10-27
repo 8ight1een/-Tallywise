@@ -39,7 +39,7 @@ from sqlalchemy.pool import NullPool
 from database import DATABASE_URL, get_session
 from main import app
 
-TABLES = ["transactions", "categories", "accounts", "users"]
+TABLES = ["idempotency_keys", "transactions", "categories", "accounts", "users"]
 
 engine = create_async_engine(DATABASE_URL, poolclass=NullPool, echo=False)
 

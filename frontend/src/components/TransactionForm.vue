@@ -27,6 +27,7 @@ const isOptionsLoading = ref(true)
 const optionsError = ref('')
 const isSubmitting = ref(false)
 const submitError = ref('')
+let pendingKey: string | undefined
 const newAccountName = ref('')
 const newCategoryName = ref('')
 const isCreatingAccount = ref(false)
@@ -55,6 +56,26 @@ const submitLabel = computed(() => {
   if (isOptionsLoading.value) return '读取中…'
   return isEditing.value ? '更新记录' : '保存记录'
 })
+
+watch(
+  [
+    amount,
+    categoryId,
+    accountId,
+    description,
+    transactionDate,
+    moneyType,
+    () => props.editingTransaction,
+  ],
+  () => {
+    pendingKey = undefined
+  },
+)
+
+function createIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
 
 async function loadAccounts() {
   accounts.value = await request<Account[]>('/api/accounts')
@@ -202,10 +223,13 @@ async function handleSubmit() {
 
   try {
     const editingId = props.editingTransaction?.id
-    const url = editingId === undefined ? '/api/transactions' : `/api/transactions/${editingId}`
+    const isCreating = editingId === undefined
+    const url = isCreating ? '/api/transactions' : `/api/transactions/${editingId}`
+    const key = isCreating ? (pendingKey ??= createIdempotencyKey()) : undefined
     await request<Transaction>(url, {
-      method: editingId === undefined ? 'POST' : 'PUT',
+      method: isCreating ? 'POST' : 'PUT',
       fallbackMessage: '保存记录失败。',
+      headers: key ? { 'Idempotency-Key': key } : undefined,
       json: {
         account_id: accountId.value,
         category_id: categoryId.value,
@@ -216,6 +240,7 @@ async function handleSubmit() {
       },
     })
 
+    pendingKey = undefined
     resetForm()
 
     savedNotice.value = '保存成功。列表仍显示所选月份，其他月份的记录请切换月份查看。'

@@ -1,5 +1,8 @@
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from main import app
 
@@ -35,6 +38,20 @@ def make_transaction_payload(account_id, category_id, money="10.00", **overrides
     }
     payload.update(overrides)
     return payload
+
+
+def post_transaction(client, payload, key=None):
+    return client.post(
+        "/api/transactions",
+        json=payload,
+        headers={"Idempotency-Key": key or str(uuid4())},
+    )
+
+
+def list_transactions(client):
+    response = client.get("/api/transactions")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def create_account(client, name="现金"):
@@ -130,10 +147,8 @@ def test_更新流水用的是PUT而不是POST(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    created = auth_client.post(
-        "/api/transactions", json=make_transaction_payload(account_id, category_id)
-    )
-    assert created.status_code == 200, created.text
+    created = post_transaction(auth_client, make_transaction_payload(account_id, category_id))
+    assert created.status_code == 201, created.text
     tid = created.json()["id"]
 
     updated = make_transaction_payload(account_id, category_id, money="20.00")
@@ -167,9 +182,9 @@ def test_删除流水返回204且无响应体(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    tid = auth_client.post(
-        "/api/transactions", json=make_transaction_payload(account_id, category_id)
-    ).json()["id"]
+    tid = post_transaction(auth_client, make_transaction_payload(account_id, category_id)).json()[
+        "id"
+    ]
 
     response = auth_client.delete(f"/api/transactions/{tid}")
     assert response.status_code == 204
@@ -180,7 +195,7 @@ def test_分类有流水时删除返回409(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    auth_client.post("/api/transactions", json=make_transaction_payload(account_id, category_id))
+    post_transaction(auth_client, make_transaction_payload(account_id, category_id))
 
     response = auth_client.delete(f"/api/categories/{category_id}")
     assert response.status_code == 409
@@ -190,7 +205,7 @@ def test_账户有流水时删除返回409(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    auth_client.post("/api/transactions", json=make_transaction_payload(account_id, category_id))
+    post_transaction(auth_client, make_transaction_payload(account_id, category_id))
 
     response = auth_client.delete(f"/api/accounts/{account_id}")
     assert response.status_code == 409
@@ -200,10 +215,8 @@ def test_用户之间不能互相访问流水(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    created = auth_client.post(
-        "/api/transactions", json=make_transaction_payload(account_id, category_id)
-    )
-    assert created.status_code == 200, created.text
+    created = post_transaction(auth_client, make_transaction_payload(account_id, category_id))
+    assert created.status_code == 201, created.text
     tid = created.json()["id"]
 
     with TestClient(app) as other:
@@ -249,9 +262,9 @@ def test_summary返回三个金额字段(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
-    auth_client.post(
-        "/api/transactions",
-        json=make_transaction_payload(account_id, category_id, money="10.00"),
+    post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id, money="10.00"),
     )
 
     response = auth_client.get("/api/summary", params={"year": 2025, "month": 1})
@@ -261,3 +274,161 @@ def test_summary返回三个金额字段(auth_client):
     assert set(body.keys()) == {"money_in", "money_out", "money_sum"}
     assert body["money_out"] == "10.00"
     assert body["money_in"] == "0"
+
+
+def test_重复提交只创建一条流水并返回原记录(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+    payload = make_transaction_payload(account_id, category_id)
+
+    first = post_transaction(auth_client, payload, key="repeat-key")
+    second = post_transaction(auth_client, payload, key="repeat-key")
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 200, second.text
+    assert second.headers["Idempotent-Replayed"] == "true"
+    assert first.json()["id"] == second.json()["id"]
+    assert len(list_transactions(auth_client)) == 1
+
+
+def test_同一个键不同请求体返回409(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+
+    first = post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id, money="10.00"),
+        key="conflict-key",
+    )
+    second = post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id, money="20.00"),
+        key="conflict-key",
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409, second.text
+    assert len(list_transactions(auth_client)) == 1
+
+
+def test_创建失败时幂等键回滚(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+    key = "rollback-key"
+
+    failed = post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, 999999),
+        key=key,
+    )
+
+    assert failed.status_code == 404, failed.text
+
+    retried = post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id),
+        key=key,
+    )
+
+    assert retried.status_code == 201, retried.text
+    assert len(list_transactions(auth_client)) == 1
+
+
+def test_不同键相同请求体创建两条流水(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+    payload = make_transaction_payload(account_id, category_id)
+
+    first = post_transaction(auth_client, payload, key="first-key")
+    second = post_transaction(auth_client, payload, key="second-key")
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["id"] != second.json()["id"]
+    assert len(list_transactions(auth_client)) == 2
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Idempotency-Key": ""},
+        {"Idempotency-Key": "x" * 201},
+    ],
+)
+def test_幂等键缺失或非法返回422(auth_client, headers):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+
+    response = auth_client.post(
+        "/api/transactions",
+        json=make_transaction_payload(account_id, category_id),
+        headers=headers,
+    )
+
+    assert response.status_code == 422, response.text
+    assert list_transactions(auth_client) == []
+
+
+def test_幂等键按用户隔离(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+    payload = make_transaction_payload(account_id, category_id)
+    key = "shared-key"
+
+    first = post_transaction(auth_client, payload, key=key)
+    assert first.status_code == 201, first.text
+
+    with TestClient(app) as other:
+        registered = other.post(
+            "/api/auth/register",
+            json={
+                "email": "idempotency-other@example.com",
+                "password": "password123",
+                "nickname": "另一个用户",
+            },
+        )
+        assert registered.status_code == 200, registered.text
+
+        logged_in = other.post(
+            "/api/auth/login",
+            json={"email": "idempotency-other@example.com", "password": "password123"},
+        )
+        assert logged_in.status_code == 200, logged_in.text
+
+        other_account_id = create_account(other, name="B的现金")
+        other_category_id = create_category(other, name="B的餐饮")
+        other_payload = make_transaction_payload(other_account_id, other_category_id)
+
+        second = post_transaction(other, other_payload, key=key)
+
+        assert second.status_code == 201, second.text
+        assert second.json()["id"] != first.json()["id"]
+        assert len(list_transactions(other)) == 1
+
+    replay = post_transaction(auth_client, payload, key=key)
+
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert len(list_transactions(auth_client)) == 1
+
+
+def test_提交失败时客户端不收到成功(auth_client, monkeypatch):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+    payload = make_transaction_payload(account_id, category_id)
+
+    async def fail_commit(_session):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+
+    with TestClient(app, raise_server_exceptions=False) as failing_client:
+        failing_client.cookies.update(auth_client.cookies)
+        response = post_transaction(failing_client, payload, key="commit-failure-key")
+
+    assert response.status_code == 500, response.text
+
+    monkeypatch.undo()
+
+    assert list_transactions(auth_client) == []

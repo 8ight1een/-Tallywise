@@ -45,13 +45,14 @@ def test_离线迁移支持其他启动目录和特殊字符密码(tmp_path, pas
     assert password not in sql + result.stderr
     assert "ADD GENERATED ALWAYS AS IDENTITY" in sql
     assert "b27f4e9a6c10" in sql
-    for table in ("users", "accounts", "categories", "transactions"):
+    for table in ("users", "accounts", "categories", "transactions", "idempotency_keys"):
         assert f"CREATE TABLE {table}" in sql
     for index in (
         "idx_accounts_user",
         "idx_trans_user_date",
         "idx_trans_account",
         "idx_trans_category",
+        "idx_idem_transaction",
     ):
         assert f"CREATE INDEX {index}" in sql
     for constraint in (
