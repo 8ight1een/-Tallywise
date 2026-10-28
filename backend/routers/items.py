@@ -119,22 +119,34 @@ async def add_transactions(
 async def add_account(
     data: AccountCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return await create_account_service(
+    account = await create_account_service(
         db=db,
         data=data,
-        user_id=current_users.id,
+        user_id=current_user.id,
     )
+
+    await db.commit()
+
+    return account
 
 
 @router.post("/categories", response_model=CategoryOut)
 async def add_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return await create_category_service(db=db, data=data, user_id=current_users.id)
+    category = await create_category_service(
+        db=db,
+        data=data,
+        user_id=current_user.id,
+    )
+
+    await db.commit()
+
+    return category
 
 
 @router.put("/transactions/{transaction_id}", response_model=TransactionOut)
@@ -144,12 +156,16 @@ async def update_transaction(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return await update_transaction_service(
+    transaction = await update_transaction_service(
         db=db,
         data=data,
         transaction_id=transaction_id,
         user_id=current_user.id,
     )
+
+    await db.commit()
+
+    return transaction
 
 
 @router.put("/accounts/{account_id}", response_model=AccountOut)
@@ -157,14 +173,18 @@ async def update_account(
     account_id: int,
     data: AccountCreate,
     db: AsyncSession = Depends(get_session),
-    current_users: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return await update_account_service(
+    account = await update_account_service(
         db=db,
         data=data,
         account_id=account_id,
-        user_id=current_users.id,
+        user_id=current_user.id,
     )
+
+    await db.commit()
+
+    return account
 
 
 @router.put("/categories/{category_id}", response_model=CategoryOut)
@@ -174,9 +194,16 @@ async def update_category(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return await update_category_service(
-        db=db, data=data, category_id=category_id, user_id=current_user.id
+    category = await update_category_service(
+        db=db,
+        data=data,
+        category_id=category_id,
+        user_id=current_user.id,
     )
+
+    await db.commit()
+
+    return category
 
 
 @router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -185,11 +212,13 @@ async def delete_transaction(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return await delete_transaction_service(
+    await delete_transaction_service(
         db=db,
         transaction_id=transaction_id,
         user_id=current_user.id,
     )
+
+    await db.commit()
 
 
 @router.delete("/accounts/{account_id}", response_model=MessageOut)
@@ -203,6 +232,9 @@ async def delete_account(
         account_id=account_id,
         user_id=current_user.id,
     )
+
+    await db.commit()
+
     return {"message": "Account deleted"}
 
 
@@ -217,6 +249,9 @@ async def delete_category(
         user_id=current_user.id,
         category_id=category_id,
     )
+
+    await db.commit()
+
     return {"message": "Category deleted"}
 
 

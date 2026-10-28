@@ -25,6 +25,8 @@ async def register(
         data=data,
     )
 
+    await db.commit()
+
     return {
         "id": new_user.id,
         "email": new_user.email,
