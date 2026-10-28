@@ -432,3 +432,57 @@ def test_提交失败时客户端不收到成功(auth_client, monkeypatch):
     monkeypatch.undo()
 
     assert list_transactions(auth_client) == []
+
+
+def test_写接口只提交一次(auth_client, monkeypatch):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+
+    original_commit = AsyncSession.commit
+    calls = []
+
+    async def counting_commit(session):
+        calls.append(1)
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", counting_commit)
+
+    response = post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id),
+    )
+
+    assert response.status_code == 201
+    assert len(calls) == 1
+
+
+def test_读接口不提交(auth_client, monkeypatch):
+    original_commit = AsyncSession.commit
+    calls = []
+
+    async def counting_commit(session):
+        calls.append(1)
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", counting_commit)
+
+    response = auth_client.get("/api/transactions")
+
+    assert response.status_code == 200
+    assert calls == []
+
+
+def test_创建账户提交失败不返回成功(auth_client, monkeypatch):
+    async def fail_commit(_session):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+
+    with TestClient(app, raise_server_exceptions=False) as failing_client:
+        failing_client.cookies.update(auth_client.cookies)
+        response = failing_client.post(
+            "/api/accounts",
+            json={"name_accounts": "失败账户"},
+        )
+
+    assert response.status_code == 500

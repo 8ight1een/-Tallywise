@@ -244,3 +244,26 @@ async def test_可以更新自己的流水(db, owner, owner_account, owner_categ
         ).scalar_one()
         assert row.money == Decimal("20.00")
         assert row.description == "改过了"
+
+
+async def test_创建流水服务只flush不提交(
+    db,
+    owner,
+    owner_account,
+    owner_category,
+):
+    await create_transaction_service(
+        db=db,
+        data=make_transaction(owner_account.id, owner_category.id),
+        user_id=owner.id,
+    )
+
+    async with AsyncSession(bind=db.bind) as observer:
+        count = await observer.scalar(select(func.count()).select_from(Transaction))
+        assert count == 0
+
+    await db.commit()
+
+    async with AsyncSession(bind=db.bind) as observer:
+        count = await observer.scalar(select(func.count()).select_from(Transaction))
+        assert count == 1

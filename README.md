@@ -4,7 +4,7 @@
 
 面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
 
-前端 Vue 3 + TypeScript，后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 20 个，后端测试 139 个。
+前端 Vue 3 + TypeScript，后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 20 个，后端测试 143 个。
 
 [项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
@@ -13,9 +13,9 @@
 - **多用户数据隔离**：所有查询以登录用户为边界；流水关联账户、分类时同时校验归属，跨用户 ID 无法读写。
 - **重复提交只创建一次**：创建流水要求 `Idempotency-Key`，用 `(user_id, idem_key)` 唯一约束和 `ON CONFLICT` 抢键；同键同体返回原流水，同键异体返回 409，前端失败重试复用同一个键。
 - **游标分页不重不漏**：按 `(transaction_date, id)` 做 keyset 分页，同一天多条记录不会因翻页丢失或重复；深页不随页码变慢。
-- **事务边界集中**：每个请求一个事务，服务层只 `flush()`；创建流水在返回前提交，保证客户端看到成功时流水与幂等键已经一起落库。
+- **事务边界集中**：每个请求一个逻辑事务，服务层只 `flush()`；所有写接口在返回前 `commit()`，读接口不提交，客户端看到成功时数据已经落库。
 - **约束分层**：Pydantic 校验输入、数据库用 `CHECK` / 外键 / 唯一约束兜底，金额用 `NUMERIC(9,2)` 而非浮点。
-- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性和 139 个后端测试（数据库相关用例跑在真实 PostgreSQL 上）。
+- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性和 143 个后端测试（数据库相关用例跑在真实 PostgreSQL 上）。
 
 ## 技术选型
 
@@ -41,7 +41,7 @@ flowchart LR
     Migration[Alembic 迁移] --> PG
 ```
 
-一次请求的路径：路由做参数校验与鉴权 → 服务层构造查询/写入 → 创建流水在返回前提交，其余写请求由会话依赖管理提交与回滚 → 业务异常在应用入口映射为 HTTP 状态码。服务层不直接面向 HTTP，便于单独测试。
+一次请求的路径：路由做参数校验与鉴权 → 服务层构造查询/写入 → 写请求在返回前提交，读请求不提交 → 业务异常在应用入口映射为 HTTP 状态码。服务层不直接面向 HTTP，便于单独测试。
 
 ```text
 backend/
@@ -50,15 +50,22 @@ backend/
 ├── services/           # 用户、记账、报表、分页
 ├── model.py            # ORM 模型、约束与索引
 ├── schemas.py          # 请求校验与响应模型
-├── database.py         # 异步连接池与事务管理
+├── database.py         # 异步连接池与会话生命周期
 ├── migrations/         # Alembic 迁移
-└── tests/              # 139 个测试（含真实 PostgreSQL）
+└── tests/              # 143 个测试（含真实 PostgreSQL）
 frontend/src/
 ├── api/                # 请求封装、401 统一处理
 ├── components/         # 登录、记账、流水、汇总
 ├── router/ · types/    # 路由与接口类型
 └── assets/
 ```
+
+### 事务约定
+
+- 写路由在返回前 `commit()` 一次。
+- service 只 `flush()`，不提交。
+- 读路由不提交，查询结束后由会话关闭或回滚。
+- 一个请求只保留一个明确的提交点。
 
 ## 设计取舍
 
@@ -67,7 +74,7 @@ frontend/src/
 | 分页 | keyset 游标 | 深页只扫一页的量；同日多条有唯一排序 | 不能跳页、不能显示总页数 |
 | 索引 | `(user_id, transaction_date, id)` | 等值 + 范围 + 排序一次满足 | 索引多一列，写入维护成本略增 |
 | 幂等 | `(user_id, idem_key)` 主键 + `ON CONFLICT` | 唯一索引原子裁决；重复请求返回原结果 | 键需要保留和清理；客户端必须配合传键 |
-| 事务 | 每请求一个事务 | 一个请求是一个原子单元；服务层可组合 | 创建流水改为提交前置，其余写接口仍依赖会话退出提交 |
+| 事务 | 写路由返回前提交，service 只 `flush()` | 一个请求是一个原子单元；2xx 代表数据已落库 | 每个写接口都要显式 `commit()`，漏写会丢数据 |
 | 金额 | `NUMERIC(9,2)` + `Decimal` | 精确小数，无浮点误差 | 金额上限 9,999,999.99 |
 | 时间 | `DATE` 业务日期 + `timestamptz` 创建时间 | 业务日期与审计时间语义分离 | 展示时区由前端决定 |
 | 认证 | JWT 放 HttpOnly Cookie | 前端不接触令牌 | 无状态，签发后无法即时吊销 |
@@ -184,7 +191,7 @@ RETURNING user_id;
 | `backend` | Ruff 检查与格式校验、mypy、`alembic upgrade head` + `alembic check`、pytest（PostgreSQL 18 服务） |
 | `frontend` | Oxlint / ESLint、`vue-tsc` 类型检查、Vite 构建 |
 
-测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、分页边界、月份与闰年、空汇总、配置校验和离线迁移。
+测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界、月份与闰年、空汇总、配置校验和离线迁移。
 
 <details>
 <summary>本地运行检查</summary>
@@ -256,7 +263,7 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 - 分页接口目前只在后端提供，页面仍一次加载整月流水；前端已支持流水的新增、编辑与删除。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
-- 事务提交目前只在创建流水路径上收口到返回前；其余写接口仍由会话依赖在请求结束时提交，后续可以统一。
+- 事务提交统一放在写路由返回前，读接口不提交；新增写接口时必须同步加 `commit()`，否则响应成功也不会落库。
 - 认证是无状态 JWT，没有即时吊销机制；退出登录仅清除 Cookie。
 - 未做缓存、限流与多实例部署；容器配置面向本地运行，线上还需要 HTTPS、反向代理、Secure Cookie 和备份策略。
 
@@ -266,7 +273,7 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 | --- | --- |
 | 游标分页、索引设计与 `EXPLAIN` | [`services/pagination.py`](backend/services/pagination.py) |
 | 幂等键、请求指纹与并发抢键 | [`services/ledger.py`](backend/services/ledger.py) · [`tests/test_idempotency.py`](backend/tests/test_idempotency.py) |
-| 事务边界与回滚 | [`database.py`](backend/database.py) · [`services/ledger.py`](backend/services/ledger.py) |
+| 事务边界与回滚 | [`database.py`](backend/database.py) · [`routers/items.py`](backend/routers/items.py) · [`services/ledger.py`](backend/services/ledger.py) |
 | 用户数据隔离与越权防护 | [`routers/items.py`](backend/routers/items.py) |
 | 迁移链与结构一致性 | [`migrations/versions`](backend/migrations/versions) |
 | 异常映射与请求追踪 | [`main.py`](backend/main.py) · [`middleware.py`](backend/middleware.py) |

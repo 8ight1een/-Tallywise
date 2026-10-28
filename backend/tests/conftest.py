@@ -97,8 +97,7 @@ async def db(prepare_database) -> AsyncGenerator[AsyncSession]:
 
 
 async def _override_get_session():
-
-    async with TestSessionLocal() as session, session.begin():
+    async with TestSessionLocal() as session:
         yield session
 
 
