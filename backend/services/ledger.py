@@ -78,7 +78,7 @@ async def lock_owned(db, model, resource_id, user_id):
 async def validate_references(db, data, user_id):
     await get_owned(db, Account, data.account_id, user_id)
 
-    category = await get_owned(db, Category, data.category_id, user_id)
+    category = await lock_owned(db, Category, data.category_id, user_id)
 
     if category.money_type != data.money_type:
         raise MoneyTypeMismatchError("分类与流水的收支类型不一致")
