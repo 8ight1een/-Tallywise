@@ -1,11 +1,12 @@
 import base64
 import json
 from datetime import date
+from typing import Literal
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model import Transaction
+from model import Account, Category, Transaction
 from services.reports import month_range
 
 Cursor = tuple[date, int]
@@ -45,7 +46,10 @@ async def list_transactions_page(
     month: int,
     limit: int,
     cursor: Cursor | None = None,
-) -> tuple[list[Transaction], str | None, bool]:
+    q: str | None = None,
+    money_type: Literal["收入", "支出"] | None = None,
+    account_id: int | None = None,
+) -> tuple[list[Transaction], str | None, bool, int]:
     start_date, end_date = month_range(year, month)
 
     stmt = select(Transaction).where(
@@ -56,6 +60,36 @@ async def list_transactions_page(
         stmt = stmt.where(Transaction.transaction_date <= date.max)
     else:
         stmt = stmt.where(Transaction.transaction_date < end_date)
+
+    if money_type is not None:
+        stmt = stmt.where(Transaction.money_type == money_type)
+
+    if account_id is not None:
+        stmt = stmt.where(Transaction.account_id == account_id)
+
+    keyword = (q or "").strip()
+
+    if keyword:
+        stmt = stmt.join(
+            Account,
+            Transaction.account_id == Account.id,
+        )
+
+        stmt = stmt.join(
+            Category,
+            Transaction.category_id == Category.id,
+        )
+
+        stmt = stmt.where(
+            or_(
+                Transaction.description.icontains(keyword, autoescape=True),
+                Account.name_accounts.icontains(keyword, autoescape=True),
+                Category.name_categories.icontains(keyword, autoescape=True),
+            )
+        )
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
 
     if cursor is not None:
         last_date, last_id = cursor
@@ -73,4 +107,4 @@ async def list_transactions_page(
     next_cursor = (
         encode_cursor(items[-1].transaction_date, items[-1].id) if has_more and items else None
     )
-    return items, next_cursor, has_more
+    return items, next_cursor, has_more, total

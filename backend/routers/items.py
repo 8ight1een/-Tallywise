@@ -282,6 +282,9 @@ async def transactions_page(
     month: int = Query(..., ge=1, le=12),
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=250),
+    money_type: Literal["收入", "支出"] | None = Query(default=None),
+    account_id: int | None = Query(default=None, gt=0),
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -293,18 +296,24 @@ async def transactions_page(
     else:
         decoded = None
 
-    items, next_cursor, has_more = await list_transactions_page(
+    items, next_cursor, has_more, total = await list_transactions_page(
         db=db,
         user_id=current_user.id,
         year=year,
         month=month,
         limit=limit,
         cursor=decoded,
+        q=q,
+        money_type=money_type,
+        account_id=account_id,
     )
+    total_pages = (total + limit - 1) // limit
     return {
         "items": items,
         "next_cursor": next_cursor,
         "has_more": has_more,
+        "total": total,
+        "total_pages": total_pages,
     }
 
 
