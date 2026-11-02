@@ -55,6 +55,8 @@ class TransactionPage(BaseModel):
     items: list[TransactionOut]
     next_cursor: str | None
     has_more: bool
+    total: int = Field(ge=0)
+    total_pages: int = Field(ge=0)
 
 
 class AccountOut(OrmOut):
