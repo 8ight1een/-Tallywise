@@ -258,7 +258,7 @@ def test_用户之间不能互相访问流水(auth_client):
     assert listed[0]["money"] == "10.00"
 
 
-def test_summary返回三个金额字段(auth_client):
+def test_summary返回金额和笔数(auth_client):
     account_id = create_account(auth_client)
     category_id = create_category(auth_client)
 
@@ -271,9 +271,52 @@ def test_summary返回三个金额字段(auth_client):
     assert response.status_code == 200
 
     body = response.json()
-    assert set(body.keys()) == {"money_in", "money_out", "money_sum"}
+    assert set(body.keys()) == {
+        "money_in",
+        "money_out",
+        "money_sum",
+        "income_count",
+        "expense_count",
+    }
     assert body["money_out"] == "10.00"
     assert body["money_in"] == "0"
+    assert body["income_count"] == 0
+    assert body["expense_count"] == 1
+
+
+def test_报表接口返回趋势分类和账户汇总(auth_client):
+    account_id = create_account(auth_client)
+    category_id = create_category(auth_client)
+
+    post_transaction(
+        auth_client,
+        make_transaction_payload(account_id, category_id, money="10.00"),
+    )
+
+    params = {"year": 2025, "month": 1}
+    daily = auth_client.get("/api/reports/daily-trend", params=params)
+    categories = auth_client.get("/api/reports/category-expenses", params=params)
+    accounts = auth_client.get("/api/reports/account-summary", params=params)
+
+    assert daily.status_code == 200, daily.text
+    assert len(daily.json()) == 31
+    assert daily.json()[0]["money_out"] == "10.00"
+
+    assert categories.status_code == 200, categories.text
+    assert categories.json() == [
+        {"category_id": category_id, "category_name": "餐饮", "amount": "10.00"}
+    ]
+
+    assert accounts.status_code == 200, accounts.text
+    assert accounts.json() == [
+        {
+            "account_id": account_id,
+            "account_name": "现金",
+            "money_in": "0",
+            "money_out": "10.00",
+            "money_sum": "-10.00",
+        }
+    ]
 
 
 def test_重复提交只创建一条流水并返回原记录(auth_client):

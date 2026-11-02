@@ -10,8 +10,11 @@ from model import User
 from schemas import (
     AccountCreate,
     AccountOut,
+    AccountSummaryOut,
     CategoryCreate,
+    CategoryExpenseOut,
     CategoryOut,
+    DailyTrendOut,
     MessageOut,
     SummaryOut,
     TransactionCreate,
@@ -35,6 +38,9 @@ from services.ledger import (
 )
 from services.pagination import decode_cursor, list_transactions_page
 from services.reports import (
+    get_account_summary_service,
+    get_category_expenses_service,
+    get_daily_trend_service,
     get_summary_service,
     get_transactions_by_month_service,
 )
@@ -325,6 +331,51 @@ async def get_transactions_by_month(
     current_user: User = Depends(get_current_user),
 ):
     return await get_transactions_by_month_service(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
+    )
+
+
+@router.get("/reports/daily-trend", response_model=list[DailyTrendOut])
+async def get_daily_trend(
+    year: int = Query(..., ge=1, le=9999),
+    month: int = Query(..., ge=1, le=12),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_daily_trend_service(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
+    )
+
+
+@router.get("/reports/category-expenses", response_model=list[CategoryExpenseOut])
+async def get_category_expenses(
+    year: int = Query(..., ge=1, le=9999),
+    month: int = Query(..., ge=1, le=12),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_category_expenses_service(
+        db=db,
+        user_id=current_user.id,
+        year=year,
+        month=month,
+    )
+
+
+@router.get("/reports/account-summary", response_model=list[AccountSummaryOut])
+async def get_account_summary(
+    year: int = Query(..., ge=1, le=9999),
+    month: int = Query(..., ge=1, le=12),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_account_summary_service(
         db=db,
         user_id=current_user.id,
         year=year,

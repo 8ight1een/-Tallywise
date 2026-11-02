@@ -87,7 +87,29 @@ class SummaryOut(BaseModel):
     money_in: Decimal
     money_out: Decimal
     money_sum: Decimal
+    income_count: int = Field(ge=0)
+    expense_count: int = Field(ge=0)
+
+
+class DailyTrendOut(BaseModel):
+    transaction_date: date
+    money_in: Decimal
+    money_out: Decimal
 
 
 class MessageOut(BaseModel):
     message: str
+
+
+class CategoryExpenseOut(BaseModel):
+    category_id: int
+    category_name: str
+    amount: Decimal
+
+
+class AccountSummaryOut(BaseModel):
+    account_id: int
+    account_name: str
+    money_in: Decimal
+    money_out: Decimal
+    money_sum: Decimal
