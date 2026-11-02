@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from model import Account, Category, Transaction, User
 from services import reports
 from services.reports import (
+    get_account_summary_service,
+    get_category_expenses_service,
+    get_daily_trend_service,
     get_summary_service,
     get_transactions_by_month_service,
     month_range,
@@ -119,6 +122,8 @@ async def test_收入和支出分开统计(db, owner, account, category):
     assert result["money_in"] == Decimal("100.00")
     assert result["money_out"] == Decimal("30.00")
     assert result["money_sum"] == Decimal("70.00")
+    assert result["income_count"] == 1
+    assert result["expense_count"] == 1
 
 
 async def test_十二月和次年一月不会互相串(db, owner, account, category):
@@ -164,6 +169,8 @@ async def test_没有流水时汇总为零(db, owner):
 
     assert result["money_in"] == 0
     assert result["money_out"] == 0
+    assert result["income_count"] == 0
+    assert result["expense_count"] == 0
 
 
 async def test_不传年月时使用数据库月份(db, owner, account, category, monkeypatch):
@@ -254,3 +261,88 @@ async def test_最大年月保留最后一天(db, owner, account, category):
     result = await get_summary_service(db=db, user_id=owner.id, year=9999, month=12)
     assert [row.id for row in rows] == [last.id]
     assert result["money_out"] == Decimal("10.00")
+
+
+async def test_每日趋势补齐整月并汇总收支(db, owner, account, category):
+    income_category = Category(user_id=owner.id, name_categories="工资", money_type="收入")
+    db.add(income_category)
+    await db.commit()
+
+    await add_transaction(db, owner, account, category, day=date(2025, 3, 2), money="10.00")
+    await add_transaction(db, owner, account, category, day=date(2025, 3, 2), money="5.00")
+    await add_transaction(
+        db,
+        owner,
+        account,
+        income_category,
+        day=date(2025, 3, 4),
+        money="100.00",
+        money_type="收入",
+    )
+    await add_transaction(db, owner, account, category, day=date(2025, 4, 1), money="999.00")
+
+    trend = await get_daily_trend_service(db=db, user_id=owner.id, year=2025, month=3)
+    by_date = {row["transaction_date"]: row for row in trend}
+
+    assert len(trend) == 31
+    assert by_date[date(2025, 3, 1)]["money_out"] == Decimal(0)
+    assert by_date[date(2025, 3, 2)]["money_out"] == Decimal("15.00")
+    assert by_date[date(2025, 3, 4)]["money_in"] == Decimal("100.00")
+    assert by_date[date(2025, 3, 31)]["money_out"] == Decimal(0)
+
+
+async def test_分类支出只统计支出并按金额排序(db, owner, account, category):
+    transport = Category(user_id=owner.id, name_categories="交通", money_type="支出")
+    salary = Category(user_id=owner.id, name_categories="工资", money_type="收入")
+    db.add_all([transport, salary])
+    await db.commit()
+
+    await add_transaction(db, owner, account, category, day=date(2025, 3, 2), money="30.00")
+    await add_transaction(db, owner, account, transport, day=date(2025, 3, 3), money="10.00")
+    await add_transaction(
+        db,
+        owner,
+        account,
+        salary,
+        day=date(2025, 3, 4),
+        money="100.00",
+        money_type="收入",
+    )
+    await add_transaction(db, owner, account, transport, day=date(2025, 4, 1), money="999.00")
+
+    rows = await get_category_expenses_service(db=db, user_id=owner.id, year=2025, month=3)
+
+    assert [(row["category_name"], row["amount"]) for row in rows] == [
+        ("餐饮", Decimal("30.00")),
+        ("交通", Decimal("10.00")),
+    ]
+
+
+async def test_账户汇总包含无流水账户并计算结余(db, owner, account, category):
+    bank = Account(user_id=owner.id, name_accounts="银行卡")
+    income_category = Category(user_id=owner.id, name_categories="工资", money_type="收入")
+    db.add_all([bank, income_category])
+    await db.commit()
+
+    await add_transaction(
+        db,
+        owner,
+        account,
+        income_category,
+        day=date(2025, 3, 2),
+        money="100.00",
+        money_type="收入",
+    )
+    await add_transaction(db, owner, account, category, day=date(2025, 3, 3), money="30.00")
+    await add_transaction(db, owner, account, category, day=date(2025, 4, 1), money="999.00")
+
+    rows = await get_account_summary_service(db=db, user_id=owner.id, year=2025, month=3)
+    by_id = {row["account_id"]: row for row in rows}
+
+    assert set(by_id) == {account.id, bank.id}
+    assert by_id[account.id]["money_in"] == Decimal("100.00")
+    assert by_id[account.id]["money_out"] == Decimal("30.00")
+    assert by_id[account.id]["money_sum"] == Decimal("70.00")
+    assert by_id[bank.id]["money_in"] == Decimal(0)
+    assert by_id[bank.id]["money_out"] == Decimal(0)
+    assert by_id[bank.id]["money_sum"] == Decimal(0)
