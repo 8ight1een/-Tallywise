@@ -1,0 +1,27 @@
+:root {
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  line-height: 1.5;
+  color: #23352f;
+  background: #f6f7f3;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  padding: 24px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
