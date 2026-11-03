@@ -94,3 +94,27 @@ jobs:
 
       - name: 构建
         run: npm run build
+
+  frontend-react:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend-react
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 检查
+        run: npm run lint
+
+      - name: 构建
+        run: npm run build
