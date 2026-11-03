@@ -4,7 +4,7 @@
 
 面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选且不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
 
-前端 Vue 3 + TypeScript，后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
+前端 Vue 3 + TypeScript（现役），React 19 + TypeScript 的重写正在 `frontend-react/` 进行中；后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
 
 [项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
@@ -59,6 +59,10 @@ frontend/src/
 ├── components/         # 登录、记账、流水、汇总
 ├── router/ · types/    # 路由与接口类型
 └── assets/
+frontend-react/src/     # React 重写（进行中，当前是脚手架）
+├── api/                # 统一请求封装
+├── App.tsx             # 最小入口页
+└── main.tsx            # 挂载入口
 ```
 
 ### 事务约定
@@ -240,9 +244,17 @@ npm ci
 npm run dev
 ```
 
+React 前端（重写中，尚未承载页面）：
+
+```powershell
+cd frontend-react
+npm ci
+npm run dev
+```
+
 - 接口文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/api/health>
-- 前端：终端输出的地址，默认 <http://localhost:5173>（`/api` 已代理到后端）
+- 前端：终端输出的地址，默认 <http://localhost:5173>（`/api` 已代理到后端）；两个前端默认端口相同，不要同时启动
 
 <details>
 <summary>不用 Docker：本地运行后端</summary>
@@ -267,6 +279,7 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
 - 分页、搜索筛选与报表接口目前只在后端提供，Vue 页面仍一次加载整月流水；前端已支持流水的新增、编辑与删除。
+- React 前端（`frontend-react/`）目前只有脚手架：已配置 `/api` 代理与统一请求模块，页面尚未实现，现役页面仍是 Vue。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
