@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/8ight1een/-Tallywise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/8ight1een/-Tallywise/actions/workflows/ci.yml)
 
-面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
+面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选且不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
 
-前端 Vue 3 + TypeScript，后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 20 个，后端测试 143 个。
+前端 Vue 3 + TypeScript，后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
 
 [项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
@@ -12,10 +12,11 @@
 
 - **多用户数据隔离**：所有查询以登录用户为边界；流水关联账户、分类时同时校验归属，跨用户 ID 无法读写。
 - **重复提交只创建一次**：创建流水要求 `Idempotency-Key`，用 `(user_id, idem_key)` 唯一约束和 `ON CONFLICT` 抢键；同键同体返回原流水，同键异体返回 409，前端失败重试复用同一个键。
-- **游标分页不重不漏**：按 `(transaction_date, id)` 做 keyset 分页，同一天多条记录不会因翻页丢失或重复；深页不随页码变慢。
+- **游标分页不重不漏**：按 `(transaction_date, id)` 做 keyset 分页，同一天多条记录不会因翻页丢失或重复；深页不随页码变慢，列表另支持关键字（描述/账户/分类）、收支类型与账户筛选。
+- **统计报表口径明确**：每日趋势把当月没有流水的日期补 0，分类支出只统计支出并按金额倒序，账户汇总用左外连接，没有流水的账户也会出现且结余为 0。
 - **事务边界集中**：每个请求一个逻辑事务，服务层只 `flush()`；所有写接口在返回前 `commit()`，读接口不提交，客户端看到成功时数据已经落库。
 - **约束分层**：Pydantic 校验输入、数据库用 `CHECK` / 外键 / 唯一约束兜底，金额用 `NUMERIC(9,2)` 而非浮点。
-- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性和 143 个后端测试（数据库相关用例跑在真实 PostgreSQL 上）。
+- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性和 150 个后端测试（数据库相关用例跑在真实 PostgreSQL 上）。
 
 ## 技术选型
 
@@ -52,7 +53,7 @@ backend/
 ├── schemas.py          # 请求校验与响应模型
 ├── database.py         # 异步连接池与会话生命周期
 ├── migrations/         # Alembic 迁移
-└── tests/              # 143 个测试（含真实 PostgreSQL）
+└── tests/              # 150 个测试（含真实 PostgreSQL）
 frontend/src/
 ├── api/                # 请求封装、401 统一处理
 ├── components/         # 登录、记账、流水、汇总
@@ -71,7 +72,7 @@ frontend/src/
 
 | 决策 | 选择 | 原因 | 代价 |
 | --- | --- | --- | --- |
-| 分页 | keyset 游标 | 深页只扫一页的量；同日多条有唯一排序 | 不能跳页、不能显示总页数 |
+| 分页 | keyset 游标 | 深页只扫一页的量；同日多条有唯一排序 | 不能按页码跳页，要总数就多一次 `COUNT` 查询 |
 | 索引 | `(user_id, transaction_date, id)` | 等值 + 范围 + 排序一次满足 | 索引多一列，写入维护成本略增 |
 | 幂等 | `(user_id, idem_key)` 主键 + `ON CONFLICT` | 唯一索引原子裁决；重复请求返回原结果 | 键需要保留和清理；客户端必须配合传键 |
 | 事务 | 写路由返回前提交，service 只 `flush()` | 一个请求是一个原子单元；2xx 代表数据已落库 | 每个写接口都要显式 `commit()`，漏写会丢数据 |
@@ -100,7 +101,7 @@ LIMIT :limit + 1;
 几个关键点：
 
 - **行比较代替 `AND`**：`date < d AND id < i` 会漏掉「日期更早但 id 更大」的行，字典序比较才正确。
-- **多取一条判断 `has_more`**：避免额外 `COUNT(*)`；书签取本页最后一条，不是多出来的那条。
+- **多取一条判断 `has_more`**：翻页本身不依赖 `COUNT(*)`，书签取本页最后一条，不是多出来的那条；`total` / `total_pages` 由同一过滤条件的子查询单独 `COUNT` 一次。
 - **游标不透明**：Base64 编码 `{日期, id}`，客户端原样回传；解不开、类型不对、越界统一返回 422，不静默回第一页。
 - **索引与排序同向**：索引列为 `(user_id, transaction_date, id)`，与 `ORDER BY transaction_date DESC, id DESC` 一致，可反向扫描；如果索引缺 `id`，同一天内的排序会退化成 `Incremental Sort`。
 - **半开区间**：月份用 `[本月第一天, 下月第一天)`，避免月末天数与时区边界问题，也不在日期列上做函数运算。
@@ -151,9 +152,12 @@ RETURNING user_id;
 | POST | `/api/transactions` | 新增流水；必须带 `Idempotency-Key`（1—200 字符） |
 | PUT | `/api/transactions/{id}` | 修改流水 |
 | DELETE | `/api/transactions/{id}` | 删除流水 |
-| GET | `/api/transactions/page` | 按月游标分页，参数 `year`、`month`、`limit`、`cursor` |
+| GET | `/api/transactions/page` | 按月游标分页，参数 `year`、`month`、`limit`、`cursor`；支持 `q`（描述/账户/分类模糊搜索）、`money_type`、`account_id` 筛选，返回 `total`、`total_pages` |
 | GET | `/api/transactions/{year}/{month}` | 按月全量（旧接口） |
-| GET | `/api/summary` | 月度收入、支出、结余，参数 `year`、`month` |
+| GET | `/api/summary` | 月度收入、支出、结余与收支笔数，参数 `year`、`month` |
+| GET | `/api/reports/daily-trend` | 当月每日收支趋势，无流水的日期补 0，参数 `year`、`month` |
+| GET | `/api/reports/category-expenses` | 当月支出按分类汇总，按金额倒序 |
+| GET | `/api/reports/account-summary` | 当月各账户收入、支出与结余，含无流水账户 |
 | GET / POST | `/api/accounts` | 账户列表 / 新增 |
 | PUT / DELETE | `/api/accounts/{id}` | 修改 / 删除账户 |
 | GET / POST | `/api/categories` | 分类列表（`money_type`）/ 新增 |
@@ -178,7 +182,9 @@ RETURNING user_id;
     }
   ],
   "next_cursor": "eyJkIjoiMjAyNi0xMC0xOCIsImlkIjoxMDZ9",
-  "has_more": true
+  "has_more": true,
+  "total": 42,
+  "total_pages": 3
 }
 ```
 
@@ -191,7 +197,7 @@ RETURNING user_id;
 | `backend` | Ruff 检查与格式校验、mypy、`alembic upgrade head` + `alembic check`、pytest（PostgreSQL 18 服务） |
 | `frontend` | Oxlint / ESLint、`vue-tsc` 类型检查、Vite 构建 |
 
-测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界、月份与闰年、空汇总、配置校验和离线迁移。
+测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界与总数、关键字与筛选、月份与闰年、空汇总、报表补零与空账户、配置校验和离线迁移。
 
 <details>
 <summary>本地运行检查</summary>
@@ -259,8 +265,9 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 
 ## 边界与后续
 
-- 分页只支持按月、按 `(日期, id)` 向后翻，不支持跳页和总页数；游标不绑定月份，跨月复用会得到空页或残缺一页。
-- 分页接口目前只在后端提供，页面仍一次加载整月流水；前端已支持流水的新增、编辑与删除。
+- 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
+- 分页、搜索筛选与报表接口目前只在后端提供，Vue 页面仍一次加载整月流水；前端已支持流水的新增、编辑与删除。
+- 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
 - 事务提交统一放在写路由返回前，读接口不提交；新增写接口时必须同步加 `commit()`，否则响应成功也不会落库。
@@ -272,7 +279,9 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 | 话题 | 代码入口 |
 | --- | --- |
 | 游标分页、索引设计与 `EXPLAIN` | [`services/pagination.py`](backend/services/pagination.py) |
+| 报表聚合口径与补零 | [`services/reports.py`](backend/services/reports.py) · [`tests/test_reports.py`](backend/tests/test_reports.py) |
 | 幂等键、请求指纹与并发抢键 | [`services/ledger.py`](backend/services/ledger.py) · [`tests/test_idempotency.py`](backend/tests/test_idempotency.py) |
+| 分类行锁与并发校验 | [`services/ledger.py`](backend/services/ledger.py) |
 | 事务边界与回滚 | [`database.py`](backend/database.py) · [`routers/items.py`](backend/routers/items.py) · [`services/ledger.py`](backend/services/ledger.py) |
 | 用户数据隔离与越权防护 | [`routers/items.py`](backend/routers/items.py) |
 | 迁移链与结构一致性 | [`migrations/versions`](backend/migrations/versions) |
