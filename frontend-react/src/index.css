@@ -1,27 +1,45 @@
-:root {
-  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  line-height: 1.5;
-  color: #23352f;
-  background: #f6f7f3;
-}
-
-*,
-*::before,
-*::after {
+* {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
+  background: #f6f7f3;
+  color: #23352f;
+  font:
+    14px/1.6 'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
 }
-
-main {
-  padding: 24px;
-}
-
 button,
 input,
-select,
-textarea {
+select {
   font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+[hidden] {
+  display: none !important;
+}
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.status {
+  padding: 24px;
+  text-align: center;
+}
+.form-error {
+  color: #a64f39;
+  font-size: 12px;
 }
