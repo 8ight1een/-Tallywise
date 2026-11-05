@@ -1,8 +1,9 @@
+import { Navigate, Route, Routes } from 'react-router'
+import AuthPage from './pages/AuthPage'
+
 export default function App() {
-  return (
-    <main>
-      <h1>Tallywise</h1>
-      <p>前端工程已就绪。</p>
-    </main>
-  )
+  return <Routes>
+    <Route path="/login" element={<AuthPage />} />
+    <Route path="*" element={<Navigate to="/login" replace />} />
+  </Routes>
 }
