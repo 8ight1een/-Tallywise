@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      COOKIE_SECURE: "true"
