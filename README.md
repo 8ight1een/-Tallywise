@@ -203,8 +203,11 @@ RETURNING user_id;
 | `backend` | Ruff 检查与格式校验、mypy、`alembic upgrade head` + `alembic check`、pytest（PostgreSQL 18 服务） |
 | `frontend` | Oxlint / ESLint、`vue-tsc` 类型检查、Vite 构建 |
 | `frontend-react` | ESLint、`tsc -b` 类型检查、vitest 单元测试、`vite build` |
+| `e2e` | Playwright 主链路：注册 → 登录 → 记一笔 → 编辑 → 删除（PostgreSQL 18 服务） |
 
 测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界与总数、关键字与筛选、月份与闰年、空汇总、报表补零与空账户、配置校验和离线迁移。
+
+端到端测试见 `frontend-react/e2e`：`npm run test:e2e` 通过 Playwright 自动拉起后端与前端（已运行则复用），执行注册登录、新增流水、编辑金额、删除流水的完整链路。首次运行需要 `npx playwright install chromium`，本地运行前需要 PostgreSQL 可用；该检查目前**不在必需检查列表**中，避免基础设施抖动阻塞合并。
 
 <details>
 <summary>本地运行检查</summary>
@@ -282,7 +285,7 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
 - Vue 页面仍一次加载整月流水，未接入搜索筛选与报表接口；React 前端已支持筛选、游标分页与报表展示。
-- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，并配有筛选、会话与格式化的单元测试；但还没有端到端测试，也没有生产部署配置（静态托管 + SPA 回退 + `/api` 反向代理）；现役页面仍是 Vue。
+- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，配有筛选、会话与格式化的单元测试，以及一条 Playwright 主链路；E2E 尚未加入必需检查，也还没有生产部署配置（静态托管 + SPA 回退 + `/api` 反向代理）；现役页面仍是 Vue。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
