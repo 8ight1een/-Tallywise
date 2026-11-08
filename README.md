@@ -4,7 +4,7 @@
 
 面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选且不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
 
-前端 Vue 3 + TypeScript（现役），React 19 + TypeScript 的重写正在 `frontend-react/` 进行中；后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
+前端有两套实现：Vue 3 + TypeScript（现役，`frontend/`）与 React 19 + TypeScript 重写（`frontend-react/`，已覆盖登录注册、流水、账户分类与统计页面）；后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
 
 [项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
@@ -22,19 +22,20 @@
 
 | 层次 | 技术 | 为什么 |
 | --- | --- | --- |
-| 前端 | Vue 3、TypeScript、Vite | 组合式 API 管理页面状态，类型约束接口边界 |
+| 前端（现役） | Vue 3、TypeScript、Vite | 组合式 API 管理页面状态，类型约束接口边界 |
+| 前端（重写） | React 19、React Router 7、TanStack Query 5 | 组件化拆分页面，服务端状态交给查询缓存，逐步替换 Vue 实现 |
 | 后端 | FastAPI、Pydantic | 声明式参数校验与 OpenAPI 文档，异常映射集中 |
 | 数据访问 | SQLAlchemy 2 AsyncSession、asyncpg | 全链路异步；用表达式构造查询，避免字符串拼接 SQL |
 | 数据库 | PostgreSQL 18 | 事务性 DDL、行构造器比较、执行计划可分析 |
 | 迁移 | Alembic | 结构变更可追踪，CI 校验模型与库一致 |
 | 认证 | PyJWT、HttpOnly Cookie、Argon2 | 前端不接触令牌，降低 XSS 读取风险 |
-| 质量 | Ruff、mypy、pytest、ESLint、Oxlint、vue-tsc | 静态检查 + 集成测试，CI 与本地命令一致 |
+| 质量 | Ruff、mypy、pytest、ESLint、Oxlint、vue-tsc、tsc | 静态检查 + 集成测试，CI 与本地命令一致 |
 
 ## 架构
 
 ```mermaid
 flowchart LR
-    UI[Vue 页面] --> Client[统一 API 请求模块]
+    UI[Vue / React 页面] --> Client[统一 API 请求模块]
     Client --> Routes[FastAPI 路由 / 认证 / 参数校验]
     Routes --> Services[业务服务]
     Services --> ORM[SQLAlchemy AsyncSession]
@@ -59,10 +60,11 @@ frontend/src/
 ├── components/         # 登录、记账、流水、汇总
 ├── router/ · types/    # 路由与接口类型
 └── assets/
-frontend-react/src/     # React 重写（进行中，当前是脚手架）
-├── api/                # 统一请求封装
-├── App.tsx             # 最小入口页
-└── main.tsx            # 挂载入口
+frontend-react/src/     # React 重写，已覆盖主要流程
+├── pages/              # 登录注册、工作台（概览/流水/账户/分类）
+├── components/         # 流水、账户分类、统计图表、弹窗
+├── api.ts · api/       # 请求封装与 401 处理
+└── useResource.ts      # TanStack Query 封装
 ```
 
 ### 事务约定
@@ -200,6 +202,7 @@ RETURNING user_id;
 | --- | --- |
 | `backend` | Ruff 检查与格式校验、mypy、`alembic upgrade head` + `alembic check`、pytest（PostgreSQL 18 服务） |
 | `frontend` | Oxlint / ESLint、`vue-tsc` 类型检查、Vite 构建 |
+| `frontend-react` | ESLint、`tsc -b` 类型检查、`vite build` |
 
 测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界与总数、关键字与筛选、月份与闰年、空汇总、报表补零与空账户、配置校验和离线迁移。
 
@@ -244,7 +247,7 @@ npm ci
 npm run dev
 ```
 
-React 前端（重写中，尚未承载页面）：
+React 前端（重写中，已覆盖登录、流水、账户分类与统计）：
 
 ```powershell
 cd frontend-react
@@ -278,8 +281,8 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 ## 边界与后续
 
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
-- 分页、搜索筛选与报表接口目前只在后端提供，Vue 页面仍一次加载整月流水；前端已支持流水的新增、编辑与删除。
-- React 前端（`frontend-react/`）目前只有脚手架：已配置 `/api` 代理与统一请求模块，页面尚未实现，现役页面仍是 Vue。
+- Vue 页面仍一次加载整月流水，未接入搜索筛选与报表接口；React 前端已支持筛选、游标分页与报表展示。
+- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，但还没有自动化测试，也没有生产部署配置（静态托管 + SPA 回退 + `/api` 反向代理）；现役页面仍是 Vue。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
@@ -299,4 +302,5 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 | 用户数据隔离与越权防护 | [`routers/items.py`](backend/routers/items.py) |
 | 迁移链与结构一致性 | [`migrations/versions`](backend/migrations/versions) |
 | 异常映射与请求追踪 | [`main.py`](backend/main.py) · [`middleware.py`](backend/middleware.py) |
-| 前端登录失效与请求封装 | [`frontend/src/api/client.ts`](frontend/src/api/client.ts) |
+| 前端登录失效与请求封装 | [`frontend/src/api/client.ts`](frontend/src/api/client.ts) · [`frontend-react/src/api.ts`](frontend-react/src/api.ts) · [`frontend-react/src/auth.ts`](frontend-react/src/auth.ts) |
+| React 端幂等键复用与游标翻页 | [`frontend-react/src/components/TransactionDialog.tsx`](frontend-react/src/components/TransactionDialog.tsx) · [`frontend-react/src/components/TransactionList.tsx`](frontend-react/src/components/TransactionList.tsx) |
