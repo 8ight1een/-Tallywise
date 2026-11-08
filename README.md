@@ -242,7 +242,7 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-Compose 启动 PostgreSQL，健康检查通过后执行 `alembic upgrade head` 并启动后端。
+Compose 启动 PostgreSQL、后端和 React 前端：前端由 nginx 托管在 <http://localhost:8080>，`/api` 由 nginx 反向代理到后端，后端只在 `127.0.0.1:8000` 暴露。
 
 ```powershell
 cd frontend
@@ -261,6 +261,32 @@ npm run dev
 - 接口文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/api/health>
 - 前端：终端输出的地址，默认 <http://localhost:5173>（`/api` 已代理到后端）；两个前端默认端口相同，不要同时启动
+- 容器化运行：<http://localhost:8080>（nginx 托管构建产物，见下节）
+
+### 生产运行（Docker Compose）
+
+`docker compose up -d --build` 会构建并启动三个服务：
+
+| 服务 | 说明 |
+| --- | --- |
+| `db` | PostgreSQL 18，数据保存在 `pgdata` 卷，不映射宿主机端口 |
+| `backend` | 启动前执行 `alembic upgrade head`，仅暴露在 `127.0.0.1:8000` |
+| `frontend-react` | 多阶段构建：Node 构建 `dist`，再由 nginx 托管；`/api` 反代到 `backend:8000` |
+
+nginx 负责三件事：
+
+1. 托管 `dist` 静态文件；`assets/` 下带哈希的文件缓存一年，`index.html` 不缓存
+2. SPA 回退：`try_files $uri $uri/ /index.html`，刷新 `/overview` 不会 404
+3. `/api` 同源代理：Cookie 的 `SameSite=Lax` 直接生效，不需要 CORS
+
+更新版本：
+
+```powershell
+git pull
+docker compose up -d --build
+```
+
+上线前还需要补齐：域名与 HTTPS、`COOKIE_SECURE=true`、数据库定时备份（`pg_dump`）、防火墙只放行 80/443，并用 TLS 反向代理（Caddy 或 nginx + certbot）指向 `frontend-react` 的 8080 端口。
 
 <details>
 <summary>不用 Docker：本地运行后端</summary>
@@ -285,13 +311,13 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
 - Vue 页面仍一次加载整月流水，未接入搜索筛选与报表接口；React 前端已支持筛选、游标分页与报表展示。
-- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，配有筛选、会话与格式化的单元测试，以及一条 Playwright 主链路；E2E 尚未加入必需检查，也还没有生产部署配置（静态托管 + SPA 回退 + `/api` 反向代理）；现役页面仍是 Vue。
+- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，配有筛选、会话与格式化的单元测试，以及一条 Playwright 主链路；E2E 尚未加入必需检查；生产侧已有 compose 前端服务与 nginx 配置，但仍缺 HTTPS、域名与备份；现役页面仍是 Vue。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
 - 事务提交统一放在写路由返回前，读接口不提交；新增写接口时必须同步加 `commit()`，否则响应成功也不会落库。
 - 认证是无状态 JWT，没有即时吊销机制；退出登录仅清除 Cookie。
-- 未做缓存、限流与多实例部署；容器配置面向本地运行，线上还需要 HTTPS、反向代理、Secure Cookie 和备份策略。
+- 未做缓存、限流与多实例部署；线上还需要 HTTPS、Secure Cookie 和备份策略。
 
 ## 可以深入讨论的点
 
