@@ -116,5 +116,8 @@ jobs:
       - name: 检查
         run: npm run lint
 
+      - name: 测试
+        run: npm run test
+
       - name: 构建
         run: npm run build
