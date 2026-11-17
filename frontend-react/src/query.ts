@@ -9,6 +9,6 @@ export const queryClient = new QueryClient({
     },
   },
 })
-export function refreshResources() {
-  return queryClient.invalidateQueries({ queryKey: ['user'] })
+export function refreshResources(throwOnError = false) {
+  return queryClient.invalidateQueries({ queryKey: ['user'] }, { throwOnError })
 }

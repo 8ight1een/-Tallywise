@@ -4,6 +4,7 @@ import AuthPage from './pages/AuthPage'
 import LedgerPage from './pages/LedgerPage'
 import Workspace from './components/Workspace'
 import { labels, type Page } from './workspace'
+import AiAssistantPage from './pages/AiAssistantPage'
 export default function App() {
   const { session, login, logout, retry, busy, message } = useAuth()
   if (session.status === 'checking')
@@ -44,7 +45,11 @@ export default function App() {
                 onLogout={logout}
                 logoutBusy={busy}
               >
-                <LedgerPage page={page} />
+                {page === 'assistant' ? (
+                  <AiAssistantPage key={user.id} userId={user.id} />
+                ) : (
+                  <LedgerPage page={page} />
+                )}
               </Workspace>
             }
           />
