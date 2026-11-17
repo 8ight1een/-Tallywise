@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from logging_config import setup_logging
 from middleware import RequestIdMiddleware
+from routers.ai import router as ai_router
 from routers.items import router as items_router
 from routers.users import router as users_router
 from services.errors import (
@@ -81,3 +82,4 @@ async def handle_unexpected(request: Request, exc: Exception):
 
 app.include_router(users_router)
 app.include_router(items_router)
+app.include_router(ai_router)
