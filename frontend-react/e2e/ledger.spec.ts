@@ -30,8 +30,8 @@ test('注册登录后可以新增、编辑、删除流水', async ({ page }) => 
   await page.getByRole('button', { name: '记一笔' }).click()
 
   await page.getByLabel('金额').fill('12.34')
-  await page.getByLabel('分类').selectOption({ label: '餐饮' })
-  await page.getByLabel('账户').selectOption({ label: '现金' })
+  await page.getByLabel('分类', { exact: true }).selectOption({ label: '餐饮' })
+  await page.getByLabel('账户', { exact: true }).selectOption({ label: '现金' })
   await page.getByLabel(/备注/).fill('午餐')
   await page.getByRole('button', { name: '保存记录' }).click()
 
