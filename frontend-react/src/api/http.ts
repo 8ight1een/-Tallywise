@@ -17,6 +17,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function getMessage(data: unknown, fallback: string): string {
   if (!isObject(data)) return fallback
   if (typeof data.detail === 'string') return data.detail
+  if (isObject(data.detail) && typeof data.detail.message === 'string')
+    return data.detail.message
   if (Array.isArray(data.detail)) {
     const messages = data.detail.flatMap((item: unknown) => {
       if (!isObject(item) || typeof item.msg !== 'string') return []

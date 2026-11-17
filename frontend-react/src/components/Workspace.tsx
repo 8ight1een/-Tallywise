@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import Icon from './Icon'
 import { NavLink } from 'react-router'
-import { labels, type Page } from '../workspace'
+import { labels, navIcons, type Page } from '../workspace'
 type Props = {
   page: Page
   name: string
@@ -30,14 +30,16 @@ export default function Workspace({
         <div className="brand-sub">有数的生活</div>
         <div className="nav-label">MY WORKSPACE</div>
         <nav className="nav">
-          {(Object.keys(labels) as Page[]).map((item, index) => (
+          {(Object.keys(labels) as Page[]).map((item) => (
             <NavLink
               key={item}
               to={'/' + item}
+              aria-label={labels[item]}
+              title={labels[item]}
               end
               className={({ isActive }) => (isActive ? 'active' : '')}
             >
-              <Icon name={['grid', 'list', 'wallet', 'tag'][index]} />
+              <Icon name={navIcons[item]} />
               <span>{labels[item]}</span>
             </NavLink>
           ))}

@@ -11,7 +11,7 @@ import type { Account, Category, Transaction } from '../types'
 import { useResource } from '../useResource'
 import EntityCards from '../components/EntityCards'
 import EntityDialog, { type EntityEditor } from '../components/EntityDialog'
-export default function LedgerPage({ page }: { page: Page }) {
+export default function LedgerPage({ page }: { page: Exclude<Page, 'assistant'> }) {
   const [search, setSearch] = useSearchParams()
   const selected = filters(search)
   function setMonth(month: string) {
