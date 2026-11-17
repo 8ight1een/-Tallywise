@@ -2,16 +2,17 @@
 
 [![CI](https://github.com/8ight1een/-Tallywise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/8ight1een/-Tallywise/actions/workflows/ci.yml)
 
-面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选且不重不漏的游标分页，以及从数据库迁移、接口测试到 CI 的完整工程链路。
+面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选的游标分页，以及先生成草稿、核对后入账的 AI 记账助手。
 
-前端有两套实现：Vue 3 + TypeScript（现役，`frontend/`）与 React 19 + TypeScript 重写（`frontend-react/`，已覆盖登录注册、流水、账户分类与统计页面）；后端 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，接口 23 个，后端测试 150 个。
+默认 Docker Compose 使用 React 19 + TypeScript 前端（`frontend-react/`），已覆盖登录注册、流水、账户分类、统计与 AI 助手页面；保留 Vue 3 + TypeScript 实现（`frontend/`）。后端使用 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL。当前包含 150 个后端测试、19 个 React 测试和 1 条 Playwright 端到端主链路。
 
-[项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [工程质量](#工程质量) · [快速开始](#快速开始)
+[项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [AI 记账助手](#ai-记账助手) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
 ## 项目亮点
 
 - **多用户数据隔离**：所有查询以登录用户为边界；流水关联账户、分类时同时校验归属，跨用户 ID 无法读写。
 - **重复提交只创建一次**：创建流水要求 `Idempotency-Key`，用 `(user_id, idem_key)` 唯一约束和 `ON CONFLICT` 抢键；同键同体返回原流水，同键异体返回 409，前端失败重试复用同一个键。
+- **AI 草稿与入账分离**：一句话提取金额、日期、账户和分类，服务端校验归属与字段；用户核对或补齐后才调用流水接口，结果不确定时复用原幂等键重试。
 - **游标分页不重不漏**：按 `(transaction_date, id)` 做 keyset 分页，同一天多条记录不会因翻页丢失或重复；深页不随页码变慢，列表另支持关键字（描述/账户/分类）、收支类型与账户筛选。
 - **统计报表口径明确**：每日趋势把当月没有流水的日期补 0，分类支出只统计支出并按金额倒序，账户汇总用左外连接，没有流水的账户也会出现且结余为 0。
 - **事务边界集中**：每个请求一个逻辑事务，服务层只 `flush()`；所有写接口在返回前 `commit()`，读接口不提交，客户端看到成功时数据已经落库。
@@ -22,9 +23,10 @@
 
 | 层次 | 技术 | 为什么 |
 | --- | --- | --- |
-| 前端（现役） | Vue 3、TypeScript、Vite | 组合式 API 管理页面状态，类型约束接口边界 |
-| 前端（重写） | React 19、React Router 7、TanStack Query 5 | 组件化拆分页面，服务端状态交给查询缓存，逐步替换 Vue 实现 |
+| 前端（默认 Compose） | React 19、React Router 7、TanStack Query 5 | 组件化拆分页面，服务端状态交给查询缓存 |
+| 前端（保留实现） | Vue 3、TypeScript、Vite | 组合式 API 管理页面状态，类型约束接口边界 |
 | 后端 | FastAPI、Pydantic | 声明式参数校验与 OpenAPI 文档，异常映射集中 |
+| AI 接入 | httpx2、Chat Completions 兼容接口、Pydantic | 服务端调用模型并校验结构化输出，密钥不下发前端 |
 | 数据访问 | SQLAlchemy 2 AsyncSession、asyncpg | 全链路异步；用表达式构造查询，避免字符串拼接 SQL |
 | 数据库 | PostgreSQL 18 | 事务性 DDL、行构造器比较、执行计划可分析 |
 | 迁移 | Alembic | 结构变更可追踪，CI 校验模型与库一致 |
@@ -40,6 +42,8 @@ flowchart LR
     Routes --> Services[业务服务]
     Services --> ORM[SQLAlchemy AsyncSession]
     ORM --> PG[(PostgreSQL)]
+    Routes --> Draft[AI 草稿服务 / 字段校验]
+    Draft --> Model[外部模型 API]
     Migration[Alembic 迁移] --> PG
 ```
 
@@ -48,7 +52,10 @@ flowchart LR
 ```text
 backend/
 ├── main.py             # 应用入口、异常映射
-├── routers/            # HTTP 接口（用户、记账）
+├── routers/            # HTTP 接口（用户、记账、AI 草稿）
+├── ai_config.py        # AI 开关、模型与限额配置
+├── ai_drafts.py        # 模型调用、限流、草稿校验
+├── ai_schemas.py       # 草稿请求、提取结果与响应模型
 ├── services/           # 用户、记账、报表、分页
 ├── model.py            # ORM 模型、约束与索引
 ├── schemas.py          # 请求校验与响应模型
@@ -60,11 +67,13 @@ frontend/src/
 ├── components/         # 登录、记账、流水、汇总
 ├── router/ · types/    # 路由与接口类型
 └── assets/
-frontend-react/src/     # React 重写，已覆盖主要流程
-├── pages/              # 登录注册、工作台（概览/流水/账户/分类）
-├── components/         # 流水、账户分类、统计图表、弹窗
+frontend-react/src/     # 默认 Compose 前端
+├── pages/              # 登录注册、账本工作台、AI 助手
+├── components/         # 流水、账户分类、统计图表、弹窗、AI 草稿卡片
+├── ai.ts               # 草稿转换、入账校验、待确认提交存储
 ├── api.ts · api/       # 请求封装与 401 处理
 └── useResource.ts      # TanStack Query 封装
+backend-ui-preview/     # 独立静态交互原型，不连接真实后端
 ```
 
 ### 事务约定
@@ -154,6 +163,7 @@ RETURNING user_id;
 | POST | `/api/auth/login` | 登录，写入 HttpOnly Cookie |
 | POST | `/api/auth/logout` | 退出，清除 Cookie |
 | GET | `/api/auth/me` | 当前登录用户 |
+| POST | `/api/ai/transaction-draft` | 生成记账草稿，不创建流水；需要登录并启用 AI |
 | GET | `/api/transactions` | 当前用户全部流水（兼容旧接口） |
 | POST | `/api/transactions` | 新增流水；必须带 `Idempotency-Key`（1—200 字符） |
 | PUT | `/api/transactions/{id}` | 修改流水 |
@@ -196,6 +206,60 @@ RETURNING user_id;
 
 最后一页返回 `"next_cursor": null, "has_more": false`。
 
+## AI 记账助手
+
+在 React 导航中打开“AI 助手”（`/assistant`），先创建账户和分类，再输入一笔收支，例如“今天午饭花了 25 元，用现金支付”。生成草稿后核对金额、日期、账户和分类，点击“确认入账”才会创建流水；也可以使用手动记账。
+
+草稿接口接收 `text`（去除首尾空白后不能为空，原始输入最多 500 字符）和 `reference_date`（`YYYY-MM-DD`，前端传本地日期）。返回 `ready` 或 `needs_input`、提取字段和问题列表；信息不完整时由用户补齐。当前仅面向单笔人民币收入或支出，不支持合并多笔、转账或外币。模型提取可能出错，即使返回 `ready` 也需要核对。
+
+### 启用与配置
+
+AI 默认关闭，不影响普通手动记账。本地直接运行后端时，在 `backend/.env` 中追加以下配置并重启后端（现有 `.env.example` 尚未包含这些项）：
+
+```dotenv
+AI_ENABLED=true
+AI_API_KEY=replace-with-your-provider-key
+AI_BASE_URL=https://api.deepseek.com/v1
+AI_MODEL=replace-with-a-model-available-to-your-account
+AI_OUTPUT_MODE=json_object
+AI_TOKEN_FIELD=max_tokens
+```
+
+`AI_BASE_URL` 必须使用 HTTPS，代码会在其后拼接 `/chat/completions`；这里的地址对应代码默认值，不代表已验证模型服务可用。模型名称、结构化输出模式和 token 参数需要与所用服务匹配。支持 `json_object` / `json_schema` 两种输出模式，以及 `max_tokens` / `max_completion_tokens` 两种 token 参数名。
+
+**Docker Compose 需要显式注入变量**：根目录 `.env` 用于 Compose 插值，当前 `compose.yaml` 没有将 `AI_*` 传入后端容器，`backend/.env` 也不会打包进镜像。可在根目录 `.env` 添加上述变量，再在 `compose.yaml` 的 `services.backend.environment` 中追加：
+
+```yaml
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_OUTPUT_MODE: ${AI_OUTPUT_MODE:-json_object}
+      AI_TOKEN_FIELD: ${AI_TOKEN_FIELD:-max_tokens}
+```
+
+然后执行 `docker compose up -d backend` 重建后端容器配置；使用生产叠加文件时继续带上 `-f compose.yaml -f compose.prod.yaml`。实际密钥只放本地环境文件，不写入前端或提交到仓库。
+
+可选配置及代码默认值：
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `AI_MAX_OUTPUT_TOKENS` | `800` | 单次模型输出 token 上限 |
+| `AI_TIMEOUT_SECONDS` | `90` | 后端模型请求超时秒数 |
+| `AI_PER_MINUTE` | `5` | 每用户每分钟请求上限 |
+| `AI_PER_DAY` | `50` | 每用户每日请求上限 |
+| `AI_GLOBAL_PER_DAY` | `200` | 当前进程每日总请求上限 |
+| `AI_CONCURRENCY` | `2` | 当前进程并发模型调用上限 |
+
+在容器中使用可选配置时，也需要把对应变量传入 `backend.environment`。限流计数保存在进程内存中，重启会清空，多实例之间不共享，每日计数按 UTC 日期重置；已尝试的上游调用即使失败也可能消耗次数和费用。
+
+### 数据与验证边界
+
+- 模型服务会收到用户输入、参考日期，以及当前用户候选账户和分类的 ID、名称、分类收支类型；不发送完整历史流水。生成草稿不写数据库。
+- 前端将待确认的入账请求和幂等键保存在当前标签页的 `sessionStorage` 中，按用户 ID 区分；入账结果不确定时应重试原提交或先核对账本。
+- 当前前端解析等待上限为 60 秒，后端默认 90 秒，慢响应可能被前端放弃；成功入账后若浏览器存储删除失败，可能残留旧待确认记录。
+- AI 前端流程已有模拟响应测试；真实模型调用效果、模型费用及 AI 后端专用测试仍需单独验证。普通账本端到端测试通过不代表真实 AI 链路已验证。
+
 ## 工程质量
 
 | 任务 | 检查内容 |
@@ -205,9 +269,11 @@ RETURNING user_id;
 | `frontend-react` | ESLint、`tsc -b` 类型检查、vitest 单元测试、`vite build` |
 | `e2e` | Playwright 主链路：注册 → 登录 → 记一笔 → 编辑 → 删除（PostgreSQL 18 服务） |
 
-测试策略：使用真实 PostgreSQL，每次运行先清理专用测试库并执行 `alembic upgrade head` 建表，每个用例前只清空业务数据——保证测的是迁移后的真实结构，而不是 ORM 临时建表。覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、写接口提交次数、读接口不提交、提交失败、分页边界与总数、关键字与筛选、月份与闰年、空汇总、报表补零与空账户、配置校验和离线迁移。
+后端测试分为纯单元测试和数据库集成测试。集成测试使用真实 PostgreSQL，在会话开始时清理专用测试库并执行 `alembic upgrade head` 建表，各数据库用例前清空业务数据，验证迁移后的真实结构。整体覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、事务提交与回滚、分页与筛选、报表、配置校验和离线迁移。
 
-端到端测试见 `frontend-react/e2e`：`npm run test:e2e` 通过 Playwright 自动拉起后端与前端（已运行则复用），执行注册登录、新增流水、编辑金额、删除流水的完整链路。首次运行需要 `npx playwright install chromium`，本地运行前需要 PostgreSQL 可用；该检查目前**不在必需检查列表**中，避免基础设施抖动阻塞合并。
+React 测试覆盖筛选、会话、格式化，以及 AI 草稿确认、入账重试等流程，共 19 项；AI 流程使用模拟 API 响应。2026-11-17 的 [PR #17 CI](https://github.com/8ight1een/-Tallywise/actions/runs/44008565236) 已通过后端、Vue、React 和端到端四项任务。
+
+端到端测试见 `frontend-react/e2e`：`npm run test:e2e` 通过 Playwright 自动拉起后端与前端（本地已运行则复用），执行注册登录、新增流水、编辑金额、删除流水的完整链路。首次运行需要 `npx playwright install chromium`，运行前需要准备已迁移的专用测试库，并让后端的 `DATABASE_NAME` 指向该库。该测试会写入用户和流水，且本地可能复用已有服务，运行前应确认服务连接的是测试库；CI 使用独立 PostgreSQL 服务。
 
 <details>
 <summary>本地运行检查</summary>
@@ -224,6 +290,9 @@ $env:TEST_DATABASE_NAME = "tallywise_test"
 # frontend
 npm run lint:ci
 npm run build
+
+# frontend-react（在该目录运行）
+npm run check
 ```
 
 测试库必须可清空，`TEST_DATABASE_NAME` 与 `DATABASE_NAME` 不同，否则测试会拒绝运行。
@@ -242,7 +311,9 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-Compose 启动 PostgreSQL、后端和 React 前端：前端由 nginx 托管在 <http://localhost:8080>，`/api` 由 nginx 反向代理到后端，后端只在 `127.0.0.1:8000` 暴露。
+Compose 启动 PostgreSQL、后端和 React 前端：前端由 nginx 托管在 <http://localhost:8080>，`/api` 由 nginx 反向代理到后端，后端只在 `127.0.0.1:8000` 暴露。AI 默认未启用，按上面的配置说明单独开启。
+
+需要前端热更新时，在仓库根目录打开终端，选择其中一套前端运行。Vue 保留实现：
 
 ```powershell
 cd frontend
@@ -250,7 +321,7 @@ npm ci
 npm run dev
 ```
 
-React 前端（重写中，已覆盖登录、流水、账户分类与统计）：
+React 前端（另开仓库根目录终端）：
 
 ```powershell
 cd frontend-react
@@ -279,14 +350,14 @@ nginx 负责三件事：
 2. SPA 回退：`try_files $uri $uri/ /index.html`，刷新 `/overview` 不会 404
 3. `/api` 同源代理：Cookie 的 `SameSite=Lax` 直接生效，不需要 CORS
 
-更新版本：
+仓库已提供 [`compose.prod.yaml`](compose.prod.yaml)（开启 `COOKIE_SECURE=true`）、[`deploy/Caddyfile`](deploy/Caddyfile)（HTTPS 反向代理）、[`deploy/bootstrap.sh`](deploy/bootstrap.sh)（服务器初始化）和 [`scripts/backup.sh`](scripts/backup.sh)（数据库备份）。生产更新使用：
 
 ```powershell
 git pull
-docker compose up -d --build
+docker compose -f compose.yaml -f compose.prod.yaml up -d --build
 ```
 
-上线前还需要补齐：域名与 HTTPS、`COOKIE_SECURE=true`、数据库定时备份（`pg_dump`）、防火墙只放行 80/443，并用 TLS 反向代理（Caddy 或 nginx + certbot）指向 `frontend-react` 的 8080 端口。
+配置文件入库不等于部署完成：仍需设置实际域名、安装并配置宿主机 Caddy、安排备份定时任务和验证恢复，并配置防火墙。生产叠加配置开启 Secure Cookie，需通过 HTTPS 访问。
 
 <details>
 <summary>不用 Docker：本地运行后端</summary>
@@ -307,17 +378,22 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 
 </details>
 
+### 静态界面原型
+
+直接用浏览器打开 [`backend-ui-preview/index.html`](backend-ui-preview/index.html) 或 [`login.html`](backend-ui-preview/login.html)，无需安装依赖。原型使用浏览器本地演示数据，不连接后端，登录页也不会创建真实用户；详见 [`backend-ui-preview/README.md`](backend-ui-preview/README.md)。
+
 ## 边界与后续
 
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
 - Vue 页面仍一次加载整月流水，未接入搜索筛选与报表接口；React 前端已支持筛选、游标分页与报表展示。
-- React 前端（`frontend-react/`）已覆盖登录注册、流水增删改、账户分类与统计页面，配有筛选、会话与格式化的单元测试，以及一条 Playwright 主链路；E2E 尚未加入必需检查；生产侧已有 compose 前端服务与 nginx 配置，但仍缺 HTTPS、域名与备份；现役页面仍是 Vue。
+- React 是默认 Compose 前端，AI 助手目前仅在 React 中提供；Vue 实现继续保留。静态界面原型独立于两套正式前端。
+- AI 默认关闭；真实模型效果、超时预算一致性、浏览器存储异常处理和后端 AI 专用测试仍需补齐。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
 - 事务提交统一放在写路由返回前，读接口不提交；新增写接口时必须同步加 `commit()`，否则响应成功也不会落库。
 - 认证是无状态 JWT，没有即时吊销机制；退出登录仅清除 Cookie。
-- 未做缓存、限流与多实例部署；线上还需要 HTTPS、Secure Cookie 和备份策略。
+- 未实现业务缓存或全站限流；AI 仅有进程内限流，尚未实现共享限额或验证多实例部署。已有 HTTPS、Secure Cookie 与备份相关配置，仍需按环境落实和验证。
 
 ## 可以深入讨论的点
 
@@ -333,3 +409,5 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 | 异常映射与请求追踪 | [`main.py`](backend/main.py) · [`middleware.py`](backend/middleware.py) |
 | 前端登录失效与请求封装 | [`frontend/src/api/client.ts`](frontend/src/api/client.ts) · [`frontend-react/src/api.ts`](frontend-react/src/api.ts) · [`frontend-react/src/auth.ts`](frontend-react/src/auth.ts) |
 | React 端幂等键复用与游标翻页 | [`frontend-react/src/components/TransactionDialog.tsx`](frontend-react/src/components/TransactionDialog.tsx) · [`frontend-react/src/components/TransactionList.tsx`](frontend-react/src/components/TransactionList.tsx) |
+| AI 字段提取、服务端校验与限流 | [`backend/ai_drafts.py`](backend/ai_drafts.py) · [`backend/routers/ai.py`](backend/routers/ai.py) |
+| AI 草稿确认与待确认提交恢复 | [`frontend-react/src/pages/AiAssistantPage.tsx`](frontend-react/src/pages/AiAssistantPage.tsx) · [`frontend-react/src/ai.ts`](frontend-react/src/ai.ts) |
