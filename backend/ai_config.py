@@ -22,6 +22,7 @@ class AISettings(BaseSettings):
     token_field: Literal["max_completion_tokens", "max_tokens"] = "max_tokens"
     reasoning_effort: Literal["none", "low", "high", "max"] = "none"
     max_output_tokens: int = Field(default=800, ge=128, le=4096)
+    batch_max_output_tokens: int = Field(default=2400, ge=128, le=4096)
     timeout_seconds: float = Field(default=90, ge=1, le=120)
     per_minute: int = Field(default=5, ge=1, le=60)
     per_day: int = Field(default=50, ge=1, le=1000)

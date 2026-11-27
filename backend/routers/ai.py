@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_config import ai_settings
 from ai_drafts import AIError, generate_draft
-from ai_schemas import DraftRequest, DraftResult
+from ai_schemas import BatchDraftRequest, BatchDraftResult, DraftRequest, DraftResult
 from auth import get_current_user
 from database import get_session
 from model import Account, Category, User
@@ -18,6 +18,19 @@ async def transaction_draft(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    return await _draft_response(data, db, current_user)
+
+
+@router.post("/transaction-drafts", response_model=BatchDraftResult)
+async def transaction_drafts(
+    data: BatchDraftRequest,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return await _draft_response(data, db, current_user)
+
+
+async def _draft_response(data: DraftRequest, db: AsyncSession, current_user: User):
     account_rows = (
         (
             await db.execute(
