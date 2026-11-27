@@ -43,12 +43,11 @@ async def get_transactions_by_month_service(
     return result.scalars().all()
 
 
-async def get_summary_service(
+async def resolve_summary_month(
     db: AsyncSession,
-    user_id: int,
-    year: int | None = None,
-    month: int | None = None,
-):
+    year: int | None,
+    month: int | None,
+) -> tuple[int, int]:
     if (year is None) != (month is None):
         raise ValueError("年份和月份必须一起提供")
 
@@ -56,8 +55,17 @@ async def get_summary_service(
         today = await db.scalar(select(func.current_date()))
         if today is None:
             raise RuntimeError("无法获取当前日期")
-        year, month = today.year, today.month
+        return today.year, today.month
+    return year, month
 
+
+async def get_summary_service(
+    db: AsyncSession,
+    user_id: int,
+    year: int | None = None,
+    month: int | None = None,
+):
+    year, month = await resolve_summary_month(db, year, month)
     start_date, end_date = month_range(year, month)
 
     month_out = select(

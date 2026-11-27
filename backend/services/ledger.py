@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import date
 from typing import Literal
 
 from sqlalchemy import select
@@ -124,9 +125,11 @@ async def create_transaction_service(
 
 async def update_transaction_service(
     db: AsyncSession, data: TransactionCreate, transaction_id: int, user_id: int
-) -> Transaction:
+) -> tuple[Transaction, date]:
     result = await db.execute(
-        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        select(Transaction)
+        .where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        .with_for_update()
     )
     transaction = result.scalar_one_or_none()
 
@@ -134,6 +137,7 @@ async def update_transaction_service(
         raise ResourceNotFoundError("Transaction not found")
 
     await validate_references(db, data, user_id)
+    old_date = transaction.transaction_date
     transaction.account_id = data.account_id
     transaction.category_id = data.category_id
     transaction.money = data.money
@@ -141,18 +145,22 @@ async def update_transaction_service(
     transaction.description = data.description
     transaction.transaction_date = data.transaction_date
     await db.flush()
-    return transaction
+    return transaction, old_date
 
 
-async def delete_transaction_service(db: AsyncSession, transaction_id: int, user_id: int) -> None:
+async def delete_transaction_service(db: AsyncSession, transaction_id: int, user_id: int) -> date:
     result = await db.execute(
-        select(Transaction).where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        select(Transaction)
+        .where(Transaction.id == transaction_id, Transaction.user_id == user_id)
+        .with_for_update()
     )
     transaction = result.scalar_one_or_none()
     if transaction is None:
         raise ResourceNotFoundError("Transaction not found")
+    old_date = transaction.transaction_date
     await db.delete(transaction)
     await db.flush()
+    return old_date
 
 
 async def update_category_service(
