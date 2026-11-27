@@ -66,6 +66,13 @@
 .workspace .ai-muted { color: var(--muted); font-size: 11px; }
 .workspace .ai-success-actions { display: grid; gap: 10px; margin-top: 25px; }
 .workspace .ai-pending-actions { display: grid; justify-items: start; gap: 10px; }
+.workspace .ai-draft-list { padding: 20px 24px; margin-bottom: 14px; }
+.workspace .ai-draft-list > p { margin: 7px 0 14px; font-size: 12px; color: var(--muted); }
+.workspace .ai-draft-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; margin-top: 5px; padding: 10px; text-align: left; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 8px; }
+.workspace .ai-draft-row[aria-pressed="true"] { background: #eef3e5; border-color: #91aa80; }
+.workspace .ai-draft-row span { overflow-wrap: anywhere; }
+.workspace .ai-draft-row strong { font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; max-width: 8em; }
+.workspace .ai-draft-row small { color: #53684c; white-space: nowrap; }
 @media (max-width: 1100px) {
   .workspace .ai-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr); gap: 18px; }
   .workspace .ai-conversation-body { padding: 25px 20px 10px; }
