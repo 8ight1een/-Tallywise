@@ -17,6 +17,9 @@ services:
 
   backend:
     build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
     restart: unless-stopped
     environment:
       DATABASE_HOST: db
@@ -27,6 +30,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY_required}
       COOKIE_SECURE: "false"
       SQL_ECHO: "false"
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -48,6 +52,9 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+
+  redis:
+    image: redis:7-alpine
 
 volumes:
   pgdata:
