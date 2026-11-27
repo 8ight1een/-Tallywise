@@ -21,10 +21,16 @@ class DraftRequest(BaseModel):
         return value
 
 
-class Extraction(BaseModel):
+MAX_DRAFTS = 10
+
+
+class BatchDraftRequest(DraftRequest):
+    text: str = Field(min_length=1, max_length=1500)
+
+
+class DraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    single_transaction: bool
     account_id: int | None
     category_id: int | None
     money: str | None
@@ -34,9 +40,31 @@ class Extraction(BaseModel):
     question: str | None
 
 
-class DraftResult(BaseModel):
+class Extraction(DraftFields):
+    single_transaction: bool
+
+
+class BatchExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    drafts: list[DraftFields]
+    warnings: list[str]
+    too_many: bool
+
+
+class ReviewedDraft(BaseModel):
     status: Literal["ready", "needs_input"]
-    fields: Extraction
+    fields: DraftFields
     transaction: TransactionCreate | None
     issues: list[str]
+
+
+class DraftResult(ReviewedDraft):
+    fields: Extraction
+    prompt_version: str
+
+
+class BatchDraftResult(BaseModel):
+    drafts: list[ReviewedDraft]
+    warnings: list[str]
     prompt_version: str
