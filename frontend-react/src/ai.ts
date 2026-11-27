@@ -5,7 +5,6 @@ import type { Catalog, MoneyType, TransactionInput } from './types'
 export type DraftResult = {
   status: 'ready' | 'needs_input'
   fields: {
-    single_transaction: boolean
     account_id: number | null
     category_id: number | null
     money: string | null
@@ -16,6 +15,11 @@ export type DraftResult = {
   }
   transaction: TransactionInput | null
   issues: string[]
+}
+
+export type BatchDraftResult = {
+  drafts: DraftResult[]
+  warnings: string[]
   prompt_version: string
 }
 
@@ -61,8 +65,8 @@ export function buildTransaction(draft: EditableDraft, catalog: Catalog): Transa
   return { ...draft, money_type: draft.money_type, money, description }
 }
 
-export function requestDraft(text: string, signal: AbortSignal) {
-  return request<DraftResult>('/ai/transaction-draft', {
+export function requestDrafts(text: string, signal: AbortSignal) {
+  return request<BatchDraftResult>('/ai/transaction-drafts', {
     ...json('POST', { text: text.trim(), reference_date: localDate() }),
     signal,
   })

@@ -43,7 +43,7 @@ export default function AiDraftCard({
       </div>
       {issues.length > 0 && !locked && (
         <div className="ai-notice" role="status">
-          <strong>识别时的提示</strong>
+          <strong>这笔草稿需核对</strong>
           <ul>{issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
           <small>可直接修改下方字段；提交时按修改后的内容重新校验。</small>
         </div>
