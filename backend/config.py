@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(min_length=1)
     cookie_secure: bool = False
     sql_echo: bool = False
+    redis_url: str | None = None
 
 
 settings = Settings()

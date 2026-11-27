@@ -1,8 +1,11 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 
+from config import settings
 from logging_config import setup_logging
 from middleware import RequestIdMiddleware
 from routers.ai import router as ai_router
@@ -17,7 +20,26 @@ from services.errors import (
 
 setup_logging()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    client = None
+    if settings.redis_url:
+        client = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.3,
+            socket_timeout=0.3,
+        )
+    app.state.redis = client
+    try:
+        yield
+    finally:
+        if client is not None:
+            await client.aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(RequestIdMiddleware)
 

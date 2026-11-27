@@ -1,6 +1,16 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,9 +51,10 @@ from services.reports import (
     get_account_summary_service,
     get_category_expenses_service,
     get_daily_trend_service,
-    get_summary_service,
     get_transactions_by_month_service,
+    resolve_summary_month,
 )
+from services.summary_cache import get_cached_summary, invalidate_summary
 
 router = APIRouter(prefix="/api", tags=["记账接口"])
 
@@ -92,6 +103,7 @@ async def get_categories(
 
 @router.post("/transactions", response_model=TransactionOut)
 async def add_transactions(
+    request: Request,
     data: TransactionCreate,
     response: Response,
     idempotency_key: str = Header(
@@ -114,6 +126,9 @@ async def add_transactions(
     await db.commit()
 
     if created:
+        await invalidate_summary(
+            getattr(request.app.state, "redis", None), current_user.id, txn.transaction_date
+        )
         response.status_code = 201
     else:
         response.headers["Idempotent-Replayed"] = "true"
@@ -157,12 +172,13 @@ async def add_category(
 
 @router.put("/transactions/{transaction_id}", response_model=TransactionOut)
 async def update_transaction(
+    request: Request,
     transaction_id: int,
     data: TransactionCreate,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    transaction = await update_transaction_service(
+    transaction, old_date = await update_transaction_service(
         db=db,
         data=data,
         transaction_id=transaction_id,
@@ -170,6 +186,12 @@ async def update_transaction(
     )
 
     await db.commit()
+    await invalidate_summary(
+        getattr(request.app.state, "redis", None),
+        current_user.id,
+        old_date,
+        transaction.transaction_date,
+    )
 
     return transaction
 
@@ -214,17 +236,19 @@ async def update_category(
 
 @router.delete("/transactions/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_transaction(
+    request: Request,
     transaction_id: int,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    await delete_transaction_service(
+    old_date = await delete_transaction_service(
         db=db,
         transaction_id=transaction_id,
         user_id=current_user.id,
     )
 
     await db.commit()
+    await invalidate_summary(getattr(request.app.state, "redis", None), current_user.id, old_date)
 
 
 @router.delete("/accounts/{account_id}", response_model=MessageOut)
@@ -263,6 +287,7 @@ async def delete_category(
 
 @router.get("/summary", response_model=SummaryOut)
 async def get_summary(
+    request: Request,
     year: int | None = Query(default=None, ge=1, le=9999),
     month: int | None = Query(default=None, ge=1, le=12),
     db: AsyncSession = Depends(get_session),
@@ -274,11 +299,9 @@ async def get_summary(
             detail="年份和月份必须一起提供",
         )
 
-    return await get_summary_service(
-        db=db,
-        user_id=current_user.id,
-        year=year,
-        month=month,
+    year, month = await resolve_summary_month(db, year, month)
+    return await get_cached_summary(
+        db, getattr(request.app.state, "redis", None), current_user.id, year, month
     )
 
 
