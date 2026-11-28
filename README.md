@@ -4,7 +4,7 @@
 
 面向家庭日常记账的全栈项目：多用户隔离的收支记录、幂等创建流水、按月流水与汇总、日报趋势/分类/账户三类统计报表、支持搜索筛选的游标分页，以及先生成草稿、核对后入账的 AI 记账助手。
 
-默认 Docker Compose 使用 React 19 + TypeScript 前端（`frontend-react/`），已覆盖登录注册、流水、账户分类、统计与 AI 助手页面；保留 Vue 3 + TypeScript 实现（`frontend/`）。后端使用 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL。当前包含 150 个后端测试、19 个 React 测试和 1 条 Playwright 端到端主链路。
+默认 Docker Compose 使用 React 19 + TypeScript 前端（`frontend-react/`），已覆盖登录注册、流水、账户分类、统计与 AI 助手页面；保留 Vue 3 + TypeScript 实现（`frontend/`）。后端使用 FastAPI + SQLAlchemy 2（异步）+ PostgreSQL，月度汇总接入 Redis 缓存。当前包含 171 个后端测试、21 个 React 测试和 1 条 Playwright 端到端主链路。
 
 [项目亮点](#项目亮点) · [技术选型](#技术选型) · [架构](#架构) · [设计取舍](#设计取舍) · [接口](#接口) · [AI 记账助手](#ai-记账助手) · [工程质量](#工程质量) · [快速开始](#快速开始)
 
@@ -12,12 +12,13 @@
 
 - **多用户数据隔离**：所有查询以登录用户为边界；流水关联账户、分类时同时校验归属，跨用户 ID 无法读写。
 - **重复提交只创建一次**：创建流水要求 `Idempotency-Key`，用 `(user_id, idem_key)` 唯一约束和 `ON CONFLICT` 抢键；同键同体返回原流水，同键异体返回 409，前端失败重试复用同一个键。
-- **AI 草稿与入账分离**：一句话提取金额、日期、账户和分类，服务端校验归属与字段；用户核对或补齐后才调用流水接口，结果不确定时复用原幂等键重试。
+- **多笔 AI 草稿与入账分离**：一段描述最多生成 10 笔草稿，服务端逐笔校验归属与字段；用户切换、补齐并逐笔确认后才调用流水接口，当前笔结果不确定时复用原幂等键重试。
+- **月度汇总缓存**：Redis 按用户和月份缓存汇总，TTL 为 60 秒；流水提交成功后清除受影响月份，缓存不可用时回退到数据库查询。
 - **游标分页不重不漏**：按 `(transaction_date, id)` 做 keyset 分页，同一天多条记录不会因翻页丢失或重复；深页不随页码变慢，列表另支持关键字（描述/账户/分类）、收支类型与账户筛选。
 - **统计报表口径明确**：每日趋势把当月没有流水的日期补 0，分类支出只统计支出并按金额倒序，账户汇总用左外连接，没有流水的账户也会出现且结余为 0。
 - **事务边界集中**：每个请求一个逻辑事务，服务层只 `flush()`；所有写接口在返回前 `commit()`，读接口不提交，客户端看到成功时数据已经落库。
 - **约束分层**：Pydantic 校验输入、数据库用 `CHECK` / 外键 / 唯一约束兜底，金额用 `NUMERIC(9,2)` 而非浮点。
-- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性、后端 150 个测试与前端单元测试（数据库相关用例跑在真实 PostgreSQL 上）。
+- **可追踪、可回归**：请求 ID + 结构化日志；CI 覆盖 lint、类型检查、迁移一致性、后端测试、前端单元测试与端到端主链路（数据库相关用例跑在真实 PostgreSQL 上）。
 
 ## 技术选型
 
@@ -29,6 +30,7 @@
 | AI 接入 | httpx2、Chat Completions 兼容接口、Pydantic | 服务端调用模型并校验结构化输出，密钥不下发前端 |
 | 数据访问 | SQLAlchemy 2 AsyncSession、asyncpg | 全链路异步；用表达式构造查询，避免字符串拼接 SQL |
 | 数据库 | PostgreSQL 18 | 事务性 DDL、行构造器比较、执行计划可分析 |
+| 汇总缓存 | Redis 7、redis-py 异步客户端 | 减少重复月度聚合查询，故障时回退数据库 |
 | 迁移 | Alembic | 结构变更可追踪，CI 校验模型与库一致 |
 | 认证 | PyJWT、HttpOnly Cookie、Argon2 | 前端不接触令牌，降低 XSS 读取风险 |
 | 质量 | Ruff、mypy、pytest、ESLint、Oxlint、vue-tsc、tsc | 静态检查 + 集成测试，CI 与本地命令一致 |
@@ -40,6 +42,7 @@ flowchart LR
     UI[Vue / React 页面] --> Client[统一 API 请求模块]
     Client --> Routes[FastAPI 路由 / 认证 / 参数校验]
     Routes --> Services[业务服务]
+    Services --> Cache[(Redis 月度汇总缓存)]
     Services --> ORM[SQLAlchemy AsyncSession]
     ORM --> PG[(PostgreSQL)]
     Routes --> Draft[AI 草稿服务 / 字段校验]
@@ -56,12 +59,12 @@ backend/
 ├── ai_config.py        # AI 开关、模型与限额配置
 ├── ai_drafts.py        # 模型调用、限流、草稿校验
 ├── ai_schemas.py       # 草稿请求、提取结果与响应模型
-├── services/           # 用户、记账、报表、分页
+├── services/           # 用户、记账、报表、分页、汇总缓存
 ├── model.py            # ORM 模型、约束与索引
 ├── schemas.py          # 请求校验与响应模型
 ├── database.py         # 异步连接池与会话生命周期
 ├── migrations/         # Alembic 迁移
-└── tests/              # 150 个测试（含真实 PostgreSQL）
+└── tests/              # 单元测试、模拟模型/缓存测试、PostgreSQL 集成测试
 frontend/src/
 ├── api/                # 请求封装、401 统一处理
 ├── components/         # 登录、记账、流水、汇总
@@ -96,6 +99,20 @@ backend-ui-preview/     # 独立静态交互原型，不连接真实后端
 | 认证 | JWT 放 HttpOnly Cookie | 前端不接触令牌 | 无状态，签发后无法即时吊销 |
 | 迁移 | Alembic + CI `alembic check` | 结构可追溯，模型与库不漂移 | 每次改模型都要配套迁移 |
 | 测试 | 真实 PostgreSQL，迁移建表 | 约束、索引、事务行为都能覆盖 | 需要可清空的专用测试库 |
+| 汇总缓存 | 先读缓存，未命中查库；写提交后删除缓存 | 降低重复聚合查询开销 | 缓存与数据库不构成原子事务，存在短暂陈旧窗口 |
+
+### 深入：月度汇总缓存
+
+仅 `GET /api/summary` 使用 Redis，流水列表与其他报表仍直接查询数据库。缓存键为 `tallywise:summary:v1:{user_id}:{year}-{month}`，月份补齐两位，TTL 为 60 秒；未指定月份时先按数据库当前日期确定年月。
+
+- 新增流水提交成功后清除对应月份；幂等重放不重复清除。
+- 修改流水先锁定记录、保留旧日期，提交后清除新旧月份；删除流水提交后清除原月份。
+- 未配置 Redis 时直接查库；Redis 读写超时或连接异常时降级，损坏的缓存数据会回源重算。缓存失效失败不会撤销已经提交的流水。
+- 这是允许短暂陈旧的缓存方案。并发读取可能在删除后写回旧结果，失效失败也可能保留旧值；TTL 用于限制缓存条目的存活时间，不提供强一致性保证。
+
+Compose 已配置 `REDIS_URL=redis://redis:6379/0`。本地直接运行后端时，可在 `backend/.env` 设置 `REDIS_URL` 指向可访问的 Redis；不设置即可关闭缓存。当前 Compose 不映射 Redis 宿主机端口，宿主机后端不能直接使用容器服务名 `redis`。
+
+实现见 [`backend/services/summary_cache.py`](backend/services/summary_cache.py)，测试见 [`backend/tests/test_summary_cache.py`](backend/tests/test_summary_cache.py)。现有缓存测试使用模拟客户端，覆盖命中、降级和失效键；真实 Redis 与路由写后失效联调仍需单独验证。
 
 ### 深入：游标分页
 
@@ -163,14 +180,15 @@ RETURNING user_id;
 | POST | `/api/auth/login` | 登录，写入 HttpOnly Cookie |
 | POST | `/api/auth/logout` | 退出，清除 Cookie |
 | GET | `/api/auth/me` | 当前登录用户 |
-| POST | `/api/ai/transaction-draft` | 生成记账草稿，不创建流水；需要登录并启用 AI |
+| POST | `/api/ai/transaction-draft` | 保留的单笔草稿接口，文本最多 500 字符，不创建流水 |
+| POST | `/api/ai/transaction-drafts` | 多笔草稿接口，文本最多 1500 字符、最多 10 笔；需要登录并启用 AI，不创建流水 |
 | GET | `/api/transactions` | 当前用户全部流水（兼容旧接口） |
 | POST | `/api/transactions` | 新增流水；必须带 `Idempotency-Key`（1—200 字符） |
 | PUT | `/api/transactions/{id}` | 修改流水 |
 | DELETE | `/api/transactions/{id}` | 删除流水 |
 | GET | `/api/transactions/page` | 按月游标分页，参数 `year`、`month`、`limit`、`cursor`；支持 `q`（描述/账户/分类模糊搜索）、`money_type`、`account_id` 筛选，返回 `total`、`total_pages` |
 | GET | `/api/transactions/{year}/{month}` | 按月全量（旧接口） |
-| GET | `/api/summary` | 月度收入、支出、结余与收支笔数，参数 `year`、`month` |
+| GET | `/api/summary` | 月度收入、支出、结余与收支笔数，参数 `year`、`month`；启用 Redis 后缓存 60 秒 |
 | GET | `/api/reports/daily-trend` | 当月每日收支趋势，无流水的日期补 0，参数 `year`、`month` |
 | GET | `/api/reports/category-expenses` | 当月支出按分类汇总，按金额倒序 |
 | GET | `/api/reports/account-summary` | 当月各账户收入、支出与结余，含无流水账户 |
@@ -208,9 +226,11 @@ RETURNING user_id;
 
 ## AI 记账助手
 
-在 React 导航中打开“AI 助手”（`/assistant`），先创建账户和分类，再输入一笔收支，例如“今天午饭花了 25 元，用现金支付”。生成草稿后核对金额、日期、账户和分类，点击“确认入账”才会创建流水；也可以使用手动记账。
+在 React 导航中打开“AI 助手”（`/assistant`），先创建账户和分类，再输入一段收支，例如“今天用现金付了早餐 8 元、午饭 18 元，两顿合计 26 元”。模型按实际收支拆成草稿，提示词要求合计不重复记账。生成后可切换草稿、修改字段或放弃某笔；逐笔点击“确认入账”才会创建流水，也可以使用手动记账。
 
-草稿接口接收 `text`（去除首尾空白后不能为空，原始输入最多 500 字符）和 `reference_date`（`YYYY-MM-DD`，前端传本地日期）。返回 `ready` 或 `needs_input`、提取字段和问题列表；信息不完整时由用户补齐。当前仅面向单笔人民币收入或支出，不支持合并多笔、转账或外币。模型提取可能出错，即使返回 `ready` 也需要核对。
+React 使用 `/api/ai/transaction-drafts`：接收 `text`（去除首尾空白后不能为空，原始输入最多 1500 字符）和 `reference_date`（`YYYY-MM-DD`，前端传本地日期）。响应包含最多 10 项 `drafts`、整体 `warnings` 和 `prompt_version`；每笔都有 `ready` 或 `needs_input` 状态、提取字段和问题列表，信息缺失时保留草稿供补齐。
+
+模型报告超量或实际返回超过 10 笔时，接口返回 422；输出未正常结束时拒绝返回部分结果。提示词要求跳过转账、外币并给出说明，未识别到交易时可返回空列表。模型仍可能漏记、重复或误判，即使状态为 `ready` 也要核对原文与每笔草稿。原 `/api/ai/transaction-draft` 保留单笔响应结构与 500 字符限制。
 
 ### 启用与配置
 
@@ -227,38 +247,31 @@ AI_TOKEN_FIELD=max_tokens
 
 `AI_BASE_URL` 必须使用 HTTPS，代码会在其后拼接 `/chat/completions`；这里的地址对应代码默认值，不代表已验证模型服务可用。模型名称、结构化输出模式和 token 参数需要与所用服务匹配。支持 `json_object` / `json_schema` 两种输出模式，以及 `max_tokens` / `max_completion_tokens` 两种 token 参数名。
 
-**Docker Compose 需要显式注入变量**：根目录 `.env` 用于 Compose 插值，当前 `compose.yaml` 没有将 `AI_*` 传入后端容器，`backend/.env` 也不会打包进镜像。可在根目录 `.env` 添加上述变量，再在 `compose.yaml` 的 `services.backend.environment` 中追加：
+**Docker Compose 已支持可选的 `backend/.env`**：`services.backend.env_file` 会把该文件中的变量注入容器，文件不存在也可启动普通记账功能。把上述 AI 配置写入 `backend/.env` 后，在仓库根目录执行 `docker compose up -d backend` 重新创建配置发生变化的容器；生产环境使用 `docker compose -f compose.yaml -f compose.prod.yaml up -d backend`。
 
-```yaml
-      AI_ENABLED: ${AI_ENABLED:-false}
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
-      AI_MODEL: ${AI_MODEL:-}
-      AI_OUTPUT_MODE: ${AI_OUTPUT_MODE:-json_object}
-      AI_TOKEN_FIELD: ${AI_TOKEN_FIELD:-max_tokens}
-```
-
-然后执行 `docker compose up -d backend` 重建后端容器配置；使用生产叠加文件时继续带上 `-f compose.yaml -f compose.prod.yaml`。实际密钥只放本地环境文件，不写入前端或提交到仓库。
+根目录 `.env` 仍负责 Compose 中数据库密码与签名密钥等插值，不能用它替代 `backend/.env` 来传入未显式声明的 AI 变量。Compose 的 `environment` 优先于 `env_file`，数据库连接、签名密钥、Cookie、SQL 日志及 `REDIS_URL` 等显式配置会覆盖文件同名值。环境文件不会打包进后端镜像，实际密钥不要提交到仓库。
 
 可选配置及代码默认值：
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `AI_MAX_OUTPUT_TOKENS` | `800` | 单次模型输出 token 上限 |
+| `AI_MAX_OUTPUT_TOKENS` | `800` | 单笔接口模型输出 token 上限 |
+| `AI_BATCH_MAX_OUTPUT_TOKENS` | `2400` | 多笔接口模型输出 token 上限 |
+| `AI_REASONING_EFFORT` | `none` | 代码对 `api.deepseek.com` 默认发送关闭思考参数；其他值为 `low` / `high` / `max`，需与实际模型能力匹配 |
 | `AI_TIMEOUT_SECONDS` | `90` | 后端模型请求超时秒数 |
 | `AI_PER_MINUTE` | `5` | 每用户每分钟请求上限 |
 | `AI_PER_DAY` | `50` | 每用户每日请求上限 |
 | `AI_GLOBAL_PER_DAY` | `200` | 当前进程每日总请求上限 |
 | `AI_CONCURRENCY` | `2` | 当前进程并发模型调用上限 |
 
-在容器中使用可选配置时，也需要把对应变量传入 `backend.environment`。限流计数保存在进程内存中，重启会清空，多实例之间不共享，每日计数按 UTC 日期重置；已尝试的上游调用即使失败也可能消耗次数和费用。
+可选 AI 配置同样可写入 `backend/.env`，Compose 会一并加载。限流计数仍保存在进程内存中，未接入 Redis；重启会清空，多实例之间不共享，每日计数按 UTC 日期重置。限额按模型请求次数计，不按返回草稿笔数计；已尝试的上游调用即使失败也可能消耗次数和费用。
 
 ### 数据与验证边界
 
 - 模型服务会收到用户输入、参考日期，以及当前用户候选账户和分类的 ID、名称、分类收支类型；不发送完整历史流水。生成草稿不写数据库。
-- 前端将待确认的入账请求和幂等键保存在当前标签页的 `sessionStorage` 中，按用户 ID 区分；入账结果不确定时应重试原提交或先核对账本。
-- 当前前端解析等待上限为 60 秒，后端默认 90 秒，慢响应可能被前端放弃；成功入账后若浏览器存储删除失败，可能残留旧待确认记录。
-- AI 前端流程已有模拟响应测试；真实模型调用效果、模型费用及 AI 后端专用测试仍需单独验证。普通账本端到端测试通过不代表真实 AI 链路已验证。
+- 前端将当前待确认入账请求和幂等键保存在当前标签页的 `sessionStorage` 中，按用户 ID 区分；结果不确定时锁定切换，重试同一笔或先核对账本。其他未提交草稿只保存在页面内存，离开或刷新页面会丢失，逐笔入账也不是整批原子事务。
+- 当前前端解析等待上限为 125 秒，后端默认 90 秒、可配置上限 120 秒；部署时还需核对 nginx 等中间代理的超时。成功入账后若浏览器存储删除失败，仍可能残留旧待确认记录。
+- AI 前后端已有模拟测试，覆盖批量结构与数量边界、逐笔校验、单笔兼容和前端确认重试；真实模型提取效果、服务参数兼容性和费用仍需单独验证。普通账本端到端测试通过不代表真实 AI 链路已验证。
 
 ## 工程质量
 
@@ -271,7 +284,7 @@ AI_TOKEN_FIELD=max_tokens
 
 后端测试分为纯单元测试和数据库集成测试。集成测试使用真实 PostgreSQL，在会话开始时清理专用测试库并执行 `alembic upgrade head` 建表，各数据库用例前清空业务数据，验证迁移后的真实结构。整体覆盖注册登录、用户隔离、账户/分类约束、流水增删改、幂等重放与并发抢键、事务提交与回滚、分页与筛选、报表、配置校验和离线迁移。
 
-React 测试覆盖筛选、会话、格式化，以及 AI 草稿确认、入账重试等流程，共 19 项；AI 流程使用模拟 API 响应。2026-11-17 的 [PR #17 CI](https://github.com/8ight1een/-Tallywise/actions/runs/44008565236) 已通过后端、Vue、React 和端到端四项任务。
+React 测试覆盖筛选、会话、格式化，以及多笔 AI 草稿切换、补齐、逐笔入账和重试等流程，共 21 项；AI 流程使用模拟 API 响应。后端共 171 项测试，包含 AI 草稿和汇总缓存的模拟测试。2026-11-28（北京时间）的 [PR #19 CI](https://github.com/8ight1een/-Tallywise/actions/runs/46031341389) 已通过后端、Vue、React 和端到端四项任务；该 CI 不验证真实模型或真实 Redis 服务。
 
 端到端测试见 `frontend-react/e2e`：`npm run test:e2e` 通过 Playwright 自动拉起后端与前端（本地已运行则复用），执行注册登录、新增流水、编辑金额、删除流水的完整链路。首次运行需要 `npx playwright install chromium`，运行前需要准备已迁移的专用测试库，并让后端的 `DATABASE_NAME` 指向该库。该测试会写入用户和流水，且本地可能复用已有服务，运行前应确认服务连接的是测试库；CI 使用独立 PostgreSQL 服务。
 
@@ -311,7 +324,7 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-Compose 启动 PostgreSQL、后端和 React 前端：前端由 nginx 托管在 <http://localhost:8080>，`/api` 由 nginx 反向代理到后端，后端只在 `127.0.0.1:8000` 暴露。AI 默认未启用，按上面的配置说明单独开启。
+Compose 启动 PostgreSQL、Redis、后端和 React 前端：前端由 nginx 托管在 <http://localhost:8080>，`/api` 由 nginx 反向代理到后端，后端只在 `127.0.0.1:8000` 暴露。AI 默认未启用，按上面的配置说明单独开启。
 
 需要前端热更新时，在仓库根目录打开终端，选择其中一套前端运行。Vue 保留实现：
 
@@ -336,11 +349,12 @@ npm run dev
 
 ### 生产运行（Docker Compose）
 
-`docker compose up -d --build` 会构建并启动三个服务：
+基础 Compose 包含四个服务；生产启动与更新命令见下方：
 
 | 服务 | 说明 |
 | --- | --- |
 | `db` | PostgreSQL 18，数据保存在 `pgdata` 卷，不映射宿主机端口 |
+| `redis` | Redis 7，供后端缓存月度汇总，不映射宿主机端口；缓存可丢失并重新生成 |
 | `backend` | 启动前执行 `alembic upgrade head`，仅暴露在 `127.0.0.1:8000` |
 | `frontend-react` | 多阶段构建：Node 构建 `dist`，再由 nginx 托管；`/api` 反代到 `backend:8000` |
 
@@ -387,13 +401,13 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 - 分页按 `(日期, id)` 向后翻，不支持按页码跳页；`total_pages` 只用于展示进度，翻页仍靠游标。游标不绑定月份，跨月复用会得到空页或残缺一页。
 - Vue 页面仍一次加载整月流水，未接入搜索筛选与报表接口；React 前端已支持筛选、游标分页与报表展示。
 - React 是默认 Compose 前端，AI 助手目前仅在 React 中提供；Vue 实现继续保留。静态界面原型独立于两套正式前端。
-- AI 默认关闭；真实模型效果、超时预算一致性、浏览器存储异常处理和后端 AI 专用测试仍需补齐。
+- AI 默认关闭；支持多笔提取和逐笔确认，不提供整批入账事务。真实模型效果、代理超时和浏览器存储异常处理仍需验证或完善。
 - 报表统计按自然月：日趋势补齐整月；分类支出不含收入；账户汇总的结余是当月收入减支出，不是账户历史余额。
 - 创建流水必须带 `Idempotency-Key`，未带键的旧客户端会收到 422；幂等键当前只增不删，尚未做过期清理。
 - `PUT` 编辑按 `id` 更新，不使用幂等键；只有创建流水需要幂等保护。
 - 事务提交统一放在写路由返回前，读接口不提交；新增写接口时必须同步加 `commit()`，否则响应成功也不会落库。
 - 认证是无状态 JWT，没有即时吊销机制；退出登录仅清除 Cookie。
-- 未实现业务缓存或全站限流；AI 仅有进程内限流，尚未实现共享限额或验证多实例部署。已有 HTTPS、Secure Cookie 与备份相关配置，仍需按环境落实和验证。
+- 月度汇总已有 Redis 缓存，允许短暂陈旧，真实 Redis 联调与路由失效测试仍需补齐；其他报表未接入缓存。未实现全站限流，AI 仍仅有进程内限流，尚未实现共享限额或验证多实例部署。已有 HTTPS、Secure Cookie 与备份相关配置，仍需按环境落实和验证。
 
 ## 可以深入讨论的点
 
@@ -401,6 +415,7 @@ Copy-Item .env.example .env      # 配置数据库连接与 SECRET_KEY
 | --- | --- |
 | 游标分页、索引设计与 `EXPLAIN` | [`services/pagination.py`](backend/services/pagination.py) |
 | 报表聚合口径与补零 | [`services/reports.py`](backend/services/reports.py) · [`tests/test_reports.py`](backend/tests/test_reports.py) |
+| 汇总缓存、写后失效与故障降级 | [`services/summary_cache.py`](backend/services/summary_cache.py) · [`tests/test_summary_cache.py`](backend/tests/test_summary_cache.py) |
 | 幂等键、请求指纹与并发抢键 | [`services/ledger.py`](backend/services/ledger.py) · [`tests/test_idempotency.py`](backend/tests/test_idempotency.py) |
 | 分类行锁与并发校验 | [`services/ledger.py`](backend/services/ledger.py) |
 | 事务边界与回滚 | [`database.py`](backend/database.py) · [`routers/items.py`](backend/routers/items.py) · [`services/ledger.py`](backend/services/ledger.py) |
